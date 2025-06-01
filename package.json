@@ -1,5 +1,17 @@
 {
+  "scripts": {
+    "start": "node index.mjs",
+    "dev": "nodemon --watch 'index.mjs'"
+  },
   "dependencies": {
-    "fastify": "^5.3.3"
+    "@aws-sdk/client-dynamodb": "^3.821.0",
+    "@fastify/aws-lambda": "^5.1.4",
+    "dotenv": "^16.5.0",
+    "fastify": "^5.3.3",
+    "nodemon": "^3.1.10"
+  },
+  "devDependencies": {
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
   }
 }
