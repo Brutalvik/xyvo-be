@@ -1,132 +1,112 @@
+// apps/api/lambda.ts
 import awsLambdaFastify from "@fastify/aws-lambda";
 import fastify from "fastify";
+import fastifyCookie from "@fastify/cookie";
+import { Issuer, generators } from "openid-client";
 import dotenv from "dotenv";
-import {
-  DynamoDBClient,
-  PutItemCommand,
-  GetItemCommand,
-} from "@aws-sdk/client-dynamodb";
-import { z } from "zod";
 
 dotenv.config();
 
 const app = fastify({ logger: true });
 
-const REGION = process.env.AWS_REGION || "us-east-2";
-const dynamoClient = new DynamoDBClient({ region: REGION });
-
-const registerSchema = z.object({
-  email: z.string().email(),
-  name: z.string().min(2),
-  preferred_locale: z.string().optional(),
+// Register cookie support
+app.register(fastifyCookie, {
+  secret: process.env.COOKIE_SECRET || "supersecret", // Needed if you later use signed cookies
+  hook: "onRequest",
 });
 
-const emailOnlySchema = z.object({
-  email: z.string().email(),
+let client;
+
+// Discover Cognito issuer and initialize OpenID Client
+app.addHook("onReady", async () => {
+  const issuer = await Issuer.discover(
+    `https://cognito-idp.${process.env.REGION}.amazonaws.com/${process.env.COGNITO_USER_POOL_ID}`
+  );
+  client = new issuer.Client({
+    client_id: process.env.COGNITO_CLIENT_ID,
+    client_secret: process.env.COGNITO_CLIENT_SECRET,
+    redirect_uris: [`${process.env.API_URL}/auth/callback`],
+    response_types: ["code"],
+  });
 });
 
-if (!REGION) {
-  console.error("Missing AWS_REGION in environment variables.");
-  process.exit(1);
-}
+// Redirect to Cognito login
+app.get("/auth/login", async (req, reply) => {
+  const nonce = generators.nonce();
+  const state = generators.state();
 
-app.decorate("dynamo", dynamoClient);
+  req.cookies.nonce = nonce;
+  req.cookies.state = state;
 
-app.get("/health", async (_, reply) =>
-  reply.status(200).send({ message: "API is Healthy", status: "ok" })
-);
+  const authUrl = client.authorizationUrl({
+    scope: "openid email profile",
+    state,
+    nonce,
+  });
 
-app.get("/", async (request, reply) => {
-  return {
-    message: "Welcome to XYVO SmartAI Shopping API",
-    version: "1.0.0",
-    routes: [
+  reply.redirect(authUrl);
+});
+
+// Handle Cognito redirect
+app.get("/auth/callback", async (req, reply) => {
+  try {
+    const params = client.callbackParams(req.raw);
+
+    const tokenSet = await client.callback(
+      `${process.env.API_URL}/auth/callback`,
+      params,
       {
-        method: "GET",
-        path: "/auth/users/check",
-        description: "Check if user exists",
-      },
-    ],
-  };
-});
+        state: req.cookies.state,
+        nonce: req.cookies.nonce,
+      }
+    );
 
-app.post("/users/register", async (request, reply) => {
-  const body = request.body;
-  const parse = registerSchema.safeParse(body);
+    const userInfo = await client.userinfo(tokenSet.access_token);
 
-  if (!parse.success) {
-    return reply
-      .status(400)
-      .send({ error: "Invalid user data", details: parse.error.errors });
-  }
+    // Set HTTP-only cookie
+    reply.setCookie("authToken", tokenSet.id_token, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "lax",
+      path: "/",
+      maxAge: 60 * 60, // 1 hour
+    });
 
-  const { email, name, preferred_locale } = parse.data;
-
-  const command = new PutItemCommand({
-    TableName: "Users",
-    Item: {
-      email: { S: email },
-      name: { S: name },
-      created_at: { S: new Date().toISOString() },
-      session_token: { S: "" },
-      session_expiry: { N: "0" },
-      is_verified: { BOOL: false },
-      preferred_locale: { S: preferred_locale || "en-US" },
-      role: { S: "user" },
-    },
-    ConditionExpression: "attribute_not_exists(email)",
-  });
-
-  try {
-    await app.dynamo.send(command);
-    return reply.status(201).send({ message: "User registered successfully" });
+    // Optional: also send user info
+    reply.redirect(`${process.env.FRONTEND_URL}/auth/success`);
   } catch (err) {
-    if (err.name === "ConditionalCheckFailedException") {
-      return reply.status(409).send({ error: "User already exists" });
-    }
-    app.log.error(err);
-    return reply.status(500).send({ error: "Internal server error" });
+    app.log.error("Callback failed", err);
+    reply.redirect(`${process.env.FRONTEND_URL}/auth/error`);
   }
 });
 
-app.post("/users/check", async (request, reply) => {
-  const body = request.body;
-  const parse = emailOnlySchema.safeParse(body);
-
-  if (!parse.success) {
-    return reply
-      .status(400)
-      .send({ error: "Invalid email", details: parse.error.errors });
+// Get authenticated user
+app.get("/auth/user", async (req, reply) => {
+  const token = req.cookies.authToken;
+  if (!token) {
+    return reply.status(401).send({ error: "Not authenticated" });
   }
-
-  const { email } = parse.data;
-
-  const command = new GetItemCommand({
-    TableName: "Users",
-    Key: {
-      email: { S: email },
-    },
-  });
-
-  try {
-    const result = await app.dynamo.send(command);
-    if (!result.Item) {
-      return reply
-        .status(404)
-        .send({ exists: false, message: "User not found" });
-    }
-    return reply.status(200).send({ exists: true, user: result.Item });
-  } catch (err) {
-    app.log.error(err);
-    return reply.status(500).send({ error: "Failed to fetch user" });
-  }
+  return reply.send({ token }); // In production, decode and verify token
 });
 
+// Logout
+app.get("/auth/logout", async (req, reply) => {
+  reply.clearCookie("authToken", { path: "/" });
+  reply.redirect(
+    `https://${process.env.COGNITO_DOMAIN}/logout?client_id=${process.env.COGNITO_CLIENT_ID}&logout_uri=${process.env.FRONTEND_URL}`
+  );
+});
+
+// Export handler for AWS Lambda
 export const handler = awsLambdaFastify(app);
 
-if (process.env.NODE_ENV === "test") {
+// For local dev
+if (process.env.NODE_ENV === "development") {
   app.listen({ port: 5000 }, (err) => {
-    if (err) console.error(err);
-    else console.log("Server listening on http://localhost:5000");
+    if (err) {
+      console.error("Error starting server:", err);
+      process.exit(1);
+    }
+    console.log("Server running at http://localhost:5000");
   });
 }
