@@ -1,112 +1,98 @@
-// apps/api/lambda.ts
 import awsLambdaFastify from "@fastify/aws-lambda";
 import fastify from "fastify";
-import fastifyCookie from "@fastify/cookie";
-import { Issuer, generators } from "openid-client";
+import fastifyCors from "@fastify/cors";
 import dotenv from "dotenv";
+import crypto from "crypto";
+
+const clientId = process.env.COGNITO_CLIENT_ID;
+const clientSecret = process.env.COGNITO_CLIENT_SECRET;
+
+//Helpers
+export function calculateSecretHash(username, clientId, clientSecret) {
+  return crypto
+    .createHmac("sha256", clientSecret)
+    .update(username + clientId)
+    .digest("base64");
+}
 
 dotenv.config();
 
 const app = fastify({ logger: true });
 
-// Register cookie support
-app.register(fastifyCookie, {
-  secret: process.env.COOKIE_SECRET || "supersecret", // Needed if you later use signed cookies
-  hook: "onRequest",
+// Allow CORS for local + deployed frontend
+app.register(fastifyCors, {
+  origin: ["http://localhost:3000", process.env.FRONTEND_URL_VERCEL],
+  credentials: true,
 });
 
-let client;
+// Allow parsing of JSON bodies
+app.addContentTypeParser(
+  "application/json",
+  { parseAs: "string" },
+  function (req, body, done) {
+    try {
+      const json = JSON.parse(body);
+      done(null, json);
+    } catch (err) {
+      done(err);
+    }
+  }
+);
 
-// Discover Cognito issuer and initialize OpenID Client
-app.addHook("onReady", async () => {
-  const issuer = await Issuer.discover(
-    `https://cognito-idp.${process.env.REGION}.amazonaws.com/${process.env.COGNITO_USER_POOL_ID}`
-  );
-  client = new issuer.Client({
-    client_id: process.env.COGNITO_CLIENT_ID,
-    client_secret: process.env.COGNITO_CLIENT_SECRET,
-    redirect_uris: [`${process.env.API_URL}/auth/callback`],
-    response_types: ["code"],
-  });
-});
-
-// Redirect to Cognito login
-app.get("/auth/login", async (req, reply) => {
-  const nonce = generators.nonce();
-  const state = generators.state();
-
-  req.cookies.nonce = nonce;
-  req.cookies.state = state;
-
-  const authUrl = client.authorizationUrl({
-    scope: "openid email profile",
-    state,
-    nonce,
-  });
-
-  reply.redirect(authUrl);
-});
-
-// Handle Cognito redirect
-app.get("/auth/callback", async (req, reply) => {
+// Register user in Cognito
+app.post("/auth/register", async (req, reply) => {
   try {
-    const params = client.callbackParams(req.raw);
+    const { email, password, name } = req.body;
 
-    const tokenSet = await client.callback(
-      `${process.env.API_URL}/auth/callback`,
-      params,
+    const secretHash = calculateSecretHash(email, clientId, clientSecret);
+
+    const response = await fetch(
+      `https://cognito-idp.${process.env.REGION}.amazonaws.com/`,
       {
-        state: req.cookies.state,
-        nonce: req.cookies.nonce,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-amz-json-1.1",
+          "X-Amz-Target": "AWSCognitoIdentityProviderService.SignUp",
+          "X-Amz-User-Agent": "aws-amplify/3.0",
+        },
+        body: JSON.stringify({
+          ClientId: clientId,
+          SecretHash: secretHash,
+          Username: email,
+          Password: password,
+          UserAttributes: [
+            { Name: "email", Value: email },
+            { Name: "name", Value: name },
+          ],
+        }),
       }
     );
 
-    const userInfo = await client.userinfo(tokenSet.access_token);
+    const data = await response.json();
 
-    // Set HTTP-only cookie
-    reply.setCookie("authToken", tokenSet.id_token, {
-      httpOnly: true,
-      secure: true,
-      sameSite: "lax",
-      path: "/",
-      maxAge: 60 * 60, // 1 hour
-    });
+    if (!response.ok) {
+      return reply
+        .status(400)
+        .send({ message: data.message || "Registration error" });
+    }
 
-    // Optional: also send user info
-    reply.redirect(`${process.env.FRONTEND_URL}/auth/success`);
-  } catch (err) {
-    app.log.error("Callback failed", err);
-    reply.redirect(`${process.env.FRONTEND_URL}/auth/error`);
+    reply.send({ id: data.UserSub, email });
+  } catch (error) {
+    app.log.error("Registration failed", error);
+    reply.status(500).send({ message: "Internal Server Error" });
   }
 });
 
-// Get authenticated user
-app.get("/auth/user", async (req, reply) => {
-  const token = req.cookies.authToken;
-  if (!token) {
-    return reply.status(401).send({ error: "Not authenticated" });
-  }
-  return reply.send({ token }); // In production, decode and verify token
-});
-
-// Logout
-app.get("/auth/logout", async (req, reply) => {
-  reply.clearCookie("authToken", { path: "/" });
-  reply.redirect(
-    `https://${process.env.COGNITO_DOMAIN}/logout?client_id=${process.env.COGNITO_CLIENT_ID}&logout_uri=${process.env.FRONTEND_URL}`
-  );
-});
-
-// Export handler for AWS Lambda
+// Export for Lambda
 export const handler = awsLambdaFastify(app);
 
-// For local dev
+// For local testing
 if (process.env.NODE_ENV === "development") {
   app.listen({ port: 5000 }, (err) => {
     if (err) {
-      console.error("Error starting server:", err);
+      console.error("Startup error:", err);
       process.exit(1);
     }
-    console.log("Server running at http://localhost:5000");
+    console.log("Local API running on http://localhost:5000");
   });
 }
