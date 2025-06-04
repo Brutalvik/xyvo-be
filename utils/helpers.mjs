@@ -1,4 +1,6 @@
 // --- Helpers ---
+import crypto from "crypto";
+
 export function calculateSecretHash(username, clientId, clientSecret) {
   return crypto
     .createHmac("sha256", clientSecret)

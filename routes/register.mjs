@@ -65,7 +65,8 @@ export async function registerRoutes(app) {
         .status(201)
         .send({ user: userSub, isRegistered: true, isLoggedIn: true });
     } catch (error) {
-      app.log.error("Registration failed", error);
+      console.log("Registration failed", error);
+      req.log.error("Registration failed", error);
       reply.status(500).send({ message: "Internal Server Error" });
     }
   });
