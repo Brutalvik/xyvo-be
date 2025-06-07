@@ -7,7 +7,7 @@ import cookie from "fastify-cookie";
 //ROUTES
 import { signinRoutes } from "./routes/signin.mjs";
 import { registerRoutes } from "./routes/register.mjs";
-import { checkUserRoutes } from "./routes/check-user.mjs";
+import { checkUserRoutes } from "./routes/checkuser.mjs";
 import { refreshTokenRoute } from "./routes/refresh-token.mjs";
 import { meRoute } from "./routes/me.mjs";
 import { signoutRoutes } from "./routes/signout.mjs";
@@ -18,9 +18,17 @@ const app = fastify({ logger: true });
 
 // --- CORS Configuration ---
 app.register(fastifyCors, {
-  origin: ["http://localhost:3000", process.env.FRONTEND_URL_VERCEL],
+  origin: [
+    "http://localhost:3000",
+    "https://xyvo.vercel.app",
+    "https://www.xyvo.ca",
+    "http://www.xyvo.ca",
+  ],
   credentials: true,
+  methods: ["GET", "POST", "OPTIONS", "HEAD"],
   allowedHeaders: ["Content-Type", "Authorization"],
+  preflightContinue: false,
+  optionsSuccessStatus: 204,
 });
 
 app.register(cookie);
