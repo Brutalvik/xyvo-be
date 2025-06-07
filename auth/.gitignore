@@ -1,0 +1,25 @@
+# Node
+node_modules/
+package-lock.json
+npm-debug.log
+yarn.lock
+
+# Serverless build
+.serverless/
+.aws-sam/
+.webpack/
+
+# Env & secrets
+.env
+.env.*.local
+
+# VSCode & IDEs
+.vscode/
+.idea/
+*.swp
+
+# Logs
+*.log
+
+# Mac/OS
+.DS_Store
