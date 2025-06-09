@@ -1,37 +1,47 @@
+import dotenv from "dotenv";
+
 import awsLambdaFastify from "@fastify/aws-lambda";
 import fastify from "fastify";
 import fastifyCors from "@fastify/cors";
-import dotenv from "dotenv";
-import cookie from "fastify-cookie";
+import fastifyCookie from "fastify-cookie";
+
+dotenv.config();
 
 //ROUTES
 import { signinRoutes } from "./routes/signin.mjs";
 import { registerRoutes } from "./routes/register.mjs";
 import { checkUserRoutes } from "./routes/checkuser.mjs";
-import { refreshTokenRoute } from "./routes/refresh-token.mjs";
+import { refreshTokenRoute } from "./routes/refresh.mjs";
 import { meRoute } from "./routes/me.mjs";
 import { signoutRoutes } from "./routes/signout.mjs";
-
-dotenv.config();
 
 const app = fastify({ logger: true });
 
 // --- CORS Configuration ---
+const allowedOrigins = [
+  "http://localhost:3000",
+  "https://xyvo.vercel.app",
+  "https://www.xyvo.ca",
+  "http://www.xyvo.ca",
+  "https://auth.xyvo.ca",
+  "https://products.xyvo.ca",
+];
+
+// --- CORS Configuration ---
 app.register(fastifyCors, {
-  origin: [
-    "http://localhost:3000",
-    "https://xyvo.vercel.app",
-    "https://www.xyvo.ca",
-    "http://www.xyvo.ca",
-  ],
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error("CORS origin not allowed"), false);
+    }
+  },
   credentials: true,
-  methods: ["GET", "POST", "OPTIONS", "HEAD"],
+  methods: ["GET", "POST", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
-  preflightContinue: false,
-  optionsSuccessStatus: 204,
 });
 
-app.register(cookie);
+app.register(fastifyCookie);
 
 // Parse JSON bodies
 app.addContentTypeParser(

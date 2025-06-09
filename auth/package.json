@@ -4,7 +4,7 @@
     "dev": "nodemon --watch 'index.mjs'"
   },
   "dependencies": {
-    "@aws-sdk/client-cognito-identity-provider": "^3.823.0",
+    "@aws-sdk/client-cognito-identity-provider": "^3.826.0",
     "@aws-sdk/client-dynamodb": "^3.821.0",
     "@fastify/aws-lambda": "^5.1.4",
     "@fastify/cookie": "^11.0.2",
@@ -19,6 +19,8 @@
     "jwks-rsa": "^3.2.0",
     "nodemon": "^3.1.10",
     "openid-client": "^6.5.0",
+    "serverless": "^4.17.0",
+    "serverless-domain-manager": "^8.0.0",
     "uuid": "^11.1.0",
     "zod": "^3.25.46"
   },

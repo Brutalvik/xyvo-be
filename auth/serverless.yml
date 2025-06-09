@@ -1,57 +1,90 @@
 service: xyvo-auth-handler
 
-frameworkVersion: "3"
-
 provider:
   name: aws
   runtime: nodejs20.x
   region: us-east-2
   memorySize: 256
-  timeout: 10
+  timeout: 15
 
   environment:
-    AWS_REGION: ${env:AWS_REGION}
+    XYVO_REGION: us-east-2
     COGNITO_USER_POOL_ID: ${env:COGNITO_USER_POOL_ID}
     COGNITO_CLIENT_ID: ${env:COGNITO_CLIENT_ID}
     COGNITO_CLIENT_SECRET: ${env:COGNITO_CLIENT_SECRET}
     JWT_SECRET: ${env:JWT_SECRET}
-    SESSION_SECRET: ${env:SESSION_SECRET}
+
+  iamRoleStatements:
+    - Effect: "Allow"
+      Action:
+        - "cognito-idp:AdminGetUser"
+        - "cognito-idp:InitiateAuth"
+        # Optional: Only uncomment if you explicitly use AdminInitiateAuthCommand in your code
+        # - "cognito-idp:AdminInitiateAuth"
+        - "cognito-idp:SignUp"
+        # Optional: Only uncomment if you explicitly use AdminConfirmSignUp or ConfirmSignUp in your code
+        # - "cognito-idp:AdminConfirmSignUp"
+        # - "cognito-idp:ConfirmSignUp"
+        # Optional: Only uncomment if you explicitly use these admin actions in your code
+        # - "cognito-idp:AdminSetUserPassword"
+        # - "cognito-idp:AdminUpdateUserAttributes"
+        # Optional: RevokeToken is usually sufficient for logout, GlobalSignOut revokes all user sessions
+        # - "cognito-idp:GlobalSignOut"
+        # - "cognito-idp:AdminUserGlobalSignOut"
+        - "cognito-idp:RevokeToken"
+      Resource: "arn:aws:cognito-idp:${self:provider.region}:*:userpool/${env:COGNITO_USER_POOL_ID}"
 
 functions:
   authApi:
     handler: index.handler
     events:
+      # Auth Signin
       - http:
           path: auth/signin
           method: post
-          cors: true
-      - http:
-          path: auth/signout
-          method: post
-          cors: true
-      - http:
-          path: auth/register
-          method: post
-          cors: true
+      - http: # OPTIONS request will be handled by your Fastify CORS plugin
+          path: auth/signin
+          method: options
+
+      # Auth Checkuser
       - http:
           path: auth/checkuser
           method: post
-          cors: true
+      - http:
+          path: auth/checkuser
+          method: options
+
+      # Auth Register
+      - http:
+          path: auth/register
+          method: post
+      - http:
+          path: auth/register
+          method: options
+
+      # Auth Signout
+      - http:
+          path: auth/signout
+          method: post
+      - http:
+          path: auth/signout
+          method: options
+
+      # Auth Me
       - http:
           path: auth/me
           method: get
-          cors: true
+      - http:
+          path: auth/me
+          method: options
+
+      # Auth Refresh
       - http:
           path: auth/refresh
           method: post
-          cors: true
       - http:
-          path: auth/{any+}
+          path: auth/refresh
           method: options
-          cors: true
-
-plugins:
-  - serverless-dotenv-plugin
 
 package:
   individually: true
@@ -59,6 +92,14 @@ package:
     - "!node_modules/aws-sdk/**"
     - "!**/*.test.js"
 
+plugins:
+  - serverless-domain-manager
+
 custom:
-  dotenv:
-    path: ../.env
+  customDomain:
+    domainName: auth.xyvo.ca
+    basePath: ""
+    stage: live
+    certificateName: auth.xyvo.ca
+    endpointType: "edge"
+    createRoute53Record: false
