@@ -13,26 +13,27 @@ provider:
     COGNITO_CLIENT_ID: ${env:COGNITO_CLIENT_ID}
     COGNITO_CLIENT_SECRET: ${env:COGNITO_CLIENT_SECRET}
     JWT_SECRET: ${env:JWT_SECRET}
+    PRODUCTS_REGION: us-east-2 # Assuming this was your PRODUCTS_REGION in the backend code
+    SELLERS_TABLE_NAME: ${env:SELLERS_TABLE_NAME} # Assuming this is also an env variable
 
   iamRoleStatements:
     - Effect: "Allow"
       Action:
         - "cognito-idp:AdminGetUser"
         - "cognito-idp:InitiateAuth"
-        # Optional: Only uncomment if you explicitly use AdminInitiateAuthCommand in your code
-        # - "cognito-idp:AdminInitiateAuth"
         - "cognito-idp:SignUp"
-        # Optional: Only uncomment if you explicitly use AdminConfirmSignUp or ConfirmSignUp in your code
-        # - "cognito-idp:AdminConfirmSignUp"
-        # - "cognito-idp:ConfirmSignUp"
-        # Optional: Only uncomment if you explicitly use these admin actions in your code
-        # - "cognito-idp:AdminSetUserPassword"
-        # - "cognito-idp:AdminUpdateUserAttributes"
-        # Optional: RevokeToken is usually sufficient for logout, GlobalSignOut revokes all user sessions
-        # - "cognito-idp:GlobalSignOut"
-        # - "cognito-idp:AdminUserGlobalSignOut"
+        - "cognito-idp:AdminConfirmSignUp" # Added as per your backend code
+        - "cognito-idp:AdminAddUserToGroup" # Added as per your backend code
         - "cognito-idp:RevokeToken"
+        - "cognito-idp:AdminInitiateAuth" # Added as per your backend code
       Resource: "arn:aws:cognito-idp:${self:provider.region}:*:userpool/${env:COGNITO_USER_POOL_ID}"
+    - Effect: "Allow"
+      Action:
+        - "dynamodb:PutItem" # Needed for createSellerProfile
+        - "dynamodb:UpdateItem"
+        - "dynamodb:GetItem"
+        - "dynamodb:Query"
+      Resource: "arn:aws:dynamodb:${self:provider.region}:*:table/${env:SELLERS_TABLE_NAME}" # Needed for SellerProfileService
 
 functions:
   authApi:
@@ -42,7 +43,7 @@ functions:
       - http:
           path: auth/signin
           method: post
-      - http: # OPTIONS request will be handled by your Fastify CORS plugin
+      - http:
           path: auth/signin
           method: options
 
@@ -60,6 +61,14 @@ functions:
           method: post
       - http:
           path: auth/register
+          method: options
+
+      # Auth Register Seller
+      - http: # POST for seller registration
+          path: auth/register-seller
+          method: post
+      - http: # OPTIONS for CORS preflight
+          path: auth/register-seller
           method: options
 
       # Auth Signout

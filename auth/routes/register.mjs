@@ -1,24 +1,21 @@
-// routes/register.mjs
 import jwt from "jsonwebtoken";
 import { getCookieOptions } from "../utils/cookieOptions.mjs";
 import { calculateSecretHash } from "../utils/helpers.mjs";
 import {
   CognitoIdentityProviderClient,
-  InitiateAuthCommand, // for post-registration login
-  GetUserCommand, // for post-registration login to get user details
+  SignUpCommand,
+  AdminConfirmSignUpCommand,
+  InitiateAuthCommand,
+  GetUserCommand,
 } from "@aws-sdk/client-cognito-identity-provider";
 
-/**
- * Registers the /auth/register route
- * @param {import('fastify').FastifyInstance} app
- */
 export async function registerRoutes(app) {
-  // ✅ Register POST handler
   app.post("/auth/register", async (req, reply) => {
     const region = process.env.XYVO_REGION;
     const clientId = process.env.COGNITO_CLIENT_ID;
     const clientSecret = process.env.COGNITO_CLIENT_SECRET;
     const jwtSecret = process.env.JWT_SECRET;
+    const userPoolId = process.env.COGNITO_USER_POOL_ID;
 
     const cognitoClient = new CognitoIdentityProviderClient({ region });
 
@@ -30,50 +27,31 @@ export async function registerRoutes(app) {
           .header("Access-Control-Allow-Origin", req.headers.origin)
           .header("Access-Control-Allow-Credentials", "true")
           .status(400)
-          .send({ error: "Email, password, and name are required" });
+          .send({ message: "Email, password, and name are required" });
       }
 
       const secretHash = calculateSecretHash(email, clientId, clientSecret);
 
-      // --- Step 1: Sign Up the User ---
-      const signUpResponse = await fetch(
-        `https://cognito-idp.${region}.amazonaws.com/`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/x-amz-json-1.1",
-            "X-Amz-Target": "AWSCognitoIdentityProviderService.SignUp",
-            "X-Amz-User-Agent": "aws-amplify/3.0",
-          },
-          body: JSON.stringify({
-            ClientId: clientId,
-            SecretHash: secretHash,
-            Username: email,
-            Password: password,
-            UserAttributes: [
-              { Name: "email", Value: email },
-              { Name: "name", Value: name },
-              { Name: "given_name", Value: name },
-              { Name: "phone_number", Value: phone },
-            ],
-          }),
-        }
-      );
+      const signUpCommand = new SignUpCommand({
+        ClientId: clientId,
+        Username: email,
+        Password: password,
+        SecretHash: secretHash,
+        UserAttributes: [
+          { Name: "email", Value: email },
+          { Name: "name", Value: name },
+          { Name: "given_name", Value: name },
+          { Name: "phone_number", Value: phone },
+        ],
+      });
+      const signUpResult = await cognitoClient.send(signUpCommand);
 
-      const signUpData = await signUpResponse.json();
+      const adminConfirmSignUpCommand = new AdminConfirmSignUpCommand({
+        UserPoolId: userPoolId,
+        Username: email,
+      });
+      await cognitoClient.send(adminConfirmSignUpCommand);
 
-      if (!signUpResponse.ok) {
-        console.error("🔴 Cognito SignUp Error:", signUpData);
-        return reply
-          .header("Access-Control-Allow-Origin", req.headers.origin)
-          .header("Access-Control-Allow-Credentials", "true")
-          .status(400)
-          .send({ message: signUpData.message || "Registration error" });
-      }
-
-      // --- Step 2: Auto-Login the User (InitiateAuth) to get tokens ---
-      // This assumes auto-confirmation is enabled in Cognito, or that
-      // confirmation happens out-of-band and the user is ready to sign in.
       const authCommand = new InitiateAuthCommand({
         AuthFlow: "USER_PASSWORD_AUTH",
         ClientId: clientId,
@@ -87,13 +65,9 @@ export async function registerRoutes(app) {
       const authResponse = await cognitoClient.send(authCommand);
       const idToken = authResponse.AuthenticationResult?.IdToken;
       const accessToken = authResponse.AuthenticationResult?.AccessToken;
-      const refreshToken = authResponse.AuthenticationResult?.RefreshToken; // REFRESH TOKEN
+      const refreshToken = authResponse.AuthenticationResult?.RefreshToken;
 
       if (!idToken || !accessToken || !refreshToken) {
-        console.error(
-          "🔴 Auto-login failed after registration: Missing tokens."
-        );
-        // clean state
         reply
           .clearCookie("token", getCookieOptions({ includeMaxAge: false }))
           .clearCookie(
@@ -110,7 +84,6 @@ export async function registerRoutes(app) {
           });
       }
 
-      // --- Step 3: Get User Details and Create Custom JWT ---
       const getUserCommand = new GetUserCommand({ AccessToken: accessToken });
       const userData = await cognitoClient.send(getUserCommand);
 
@@ -121,14 +94,14 @@ export async function registerRoutes(app) {
 
       const user = {
         id: attributes.sub,
+        sub: attributes.sub, // ADDED: Ensures the JWT payload has a 'sub' claim
         email: attributes.email,
         name: attributes.name || attributes.given_name,
         phone: attributes.phone_number || null,
       };
 
-      const jwtToken = jwt.sign(user, jwtSecret, { expiresIn: "1h" }); // custom short-lived JWT
+      const jwtToken = jwt.sign(user, jwtSecret, { expiresIn: "1h" });
 
-      // --- Step 4: Set Cookies and Send Response ---
       reply
         .setCookie("token", jwtToken, getCookieOptions({ includeMaxAge: true }))
         .setCookie(
@@ -136,17 +109,38 @@ export async function registerRoutes(app) {
           refreshToken,
           getCookieOptions({
             includeMaxAge: true,
-            maxAge: 30 * 24 * 60 * 60 * 1000, // Cognito setting (30 days)
-            path: "/auth/refresh", // IMPORTANT: Only send this cookie to the refresh endpoint
+            maxAge: 30 * 24 * 60 * 60 * 1000,
+            path: "/auth/refresh",
           })
         )
         .header("Access-Control-Allow-Origin", req.headers.origin)
         .header("Access-Control-Allow-Credentials", "true")
-        .status(201) // 201 Created is appropriate for successful registration followed by auto-login
+        .status(201)
         .send({ user, isRegistered: true, isLoggedIn: true });
     } catch (error) {
-      console.error("🔴 Registration failed:", error);
-      req.log.error("Registration failed:", error?.name || error);
+      console.error("Registration failed:", error);
+
+      if (error.name === "UsernameExistsException") {
+        return reply
+          .header("Access-Control-Allow-Origin", req.headers.origin)
+          .header("Access-Control-Allow-Credentials", "true")
+          .status(409)
+          .send({ message: "Email already registered." });
+      } else if (error.name === "InvalidPasswordException") {
+        return reply
+          .header("Access-Control-Allow-Origin", req.headers.origin)
+          .header("Access-Control-Allow-Credentials", "true")
+          .status(400)
+          .send({ message: "Password does not meet requirements." });
+      } else if (error.name === "UserNotConfirmedException") {
+        return reply
+          .header("Access-Control-Allow-Origin", req.headers.origin)
+          .header("Access-Control-Allow-Credentials", "true")
+          .status(400)
+          .send({
+            message: "User not confirmed. Please check your email/phone.",
+          });
+      }
 
       reply
         .header("Access-Control-Allow-Origin", req.headers.origin)

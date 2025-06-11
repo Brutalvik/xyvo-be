@@ -1,4 +1,3 @@
-// routes/signin.mjs
 import {
   CognitoIdentityProviderClient,
   InitiateAuthCommand,
@@ -8,29 +7,39 @@ import jwt from "jsonwebtoken";
 import { getCookieOptions } from "../utils/cookieOptions.mjs";
 import { calculateSecretHash } from "../utils/helpers.mjs";
 
-/**
- * Registers the /auth/signin route
- * @param {import('fastify').FastifyInstance} app
- */
 export async function signinRoutes(app) {
-  // ✅ Main POST /auth/signin route
   app.post("/auth/signin", async (req, reply) => {
     const region = process.env.XYVO_REGION;
-    const clientId = process.env.COGNITO_CLIENT_ID;
-    const clientSecret = process.env.COGNITO_CLIENT_SECRET;
     const jwtSecret = process.env.JWT_SECRET;
 
     const cognitoClient = new CognitoIdentityProviderClient({ region });
 
     try {
-      const { email, password } = req.body || {};
+      const { email, password, userPoolId } = req.body || {};
 
-      if (!email || !password) {
+      if (!email || !password || !userPoolId) {
         return reply
           .header("Access-Control-Allow-Origin", req.headers.origin)
           .header("Access-Control-Allow-Credentials", "true")
           .status(400)
-          .send({ error: "Email and password are required" });
+          .send({ error: "Email, password, and userPoolId are required" });
+      }
+
+      let clientId;
+      let clientSecret;
+
+      if (userPoolId === process.env.COGNITO_USER_POOL_ID) {
+        clientId = process.env.COGNITO_CLIENT_ID;
+        clientSecret = process.env.COGNITO_CLIENT_SECRET;
+      } else if (userPoolId === process.env.COGNITO_SELLER_POOL_ID) {
+        clientId = process.env.COGNITO_CLIENT_ID_SELLERS;
+        clientSecret = process.env.COGNITO_CLIENT_SECRET_SELLERS;
+      } else {
+        return reply
+          .header("Access-Control-Allow-Origin", req.headers.origin)
+          .header("Access-Control-Allow-Credentials", "true")
+          .status(400)
+          .send({ error: "Invalid userPoolId provided" });
       }
 
       const secretHash = calculateSecretHash(email, clientId, clientSecret);
@@ -43,6 +52,7 @@ export async function signinRoutes(app) {
           PASSWORD: password,
           SECRET_HASH: secretHash,
         },
+        UserPoolId: userPoolId,
       });
 
       const authResponse = await cognitoClient.send(authCommand);
@@ -68,12 +78,20 @@ export async function signinRoutes(app) {
 
       const user = {
         id: attributes.sub,
+        sub: attributes.sub, // ADDED: Ensures the JWT payload has a 'sub' claim
         email: attributes.email,
         name: attributes.name || attributes.given_name,
         phone: attributes.phone_number || null,
+        given_name: attributes.given_name,
+        family_name: attributes.family_name,
+        business_name: attributes["custom:business_name"],
+        group:
+          userPoolId === process.env.COGNITO_SELLER_POOL_ID
+            ? "Sellers"
+            : "Customers",
       };
 
-      const jwtToken = jwt.sign(user, jwtSecret, { expiresIn: "1h" }); //custom short-lived JWT
+      const jwtToken = jwt.sign(user, jwtSecret, { expiresIn: "1h" });
 
       reply
         .setCookie("token", jwtToken, getCookieOptions({ includeMaxAge: true }))
@@ -82,8 +100,8 @@ export async function signinRoutes(app) {
           refreshToken,
           getCookieOptions({
             includeMaxAge: true,
-            maxAge: 30 * 24 * 60 * 60 * 1000, // Cognito setting (30 days)
-            path: "/auth/refresh", // IMPORTANT: Only send this cookie to the refresh endpoint
+            maxAge: 30 * 24 * 60 * 60 * 1000,
+            path: "/auth/refresh",
           })
         )
         .header("Access-Control-Allow-Origin", req.headers.origin)
@@ -94,16 +112,28 @@ export async function signinRoutes(app) {
           user,
         });
     } catch (err) {
-      console.error("🔴 Cognito signin error:", err);
+      console.error("Cognito signin error:", err);
       req.log.error("Cognito signin error:", err?.name || err);
+
+      let errorMessage = "Authentication failed";
+      let statusCode = 500;
+
+      if (
+        err.name === "NotAuthorizedException" ||
+        err.name === "UserNotFoundException" ||
+        err.name === "UserNotConfirmedException"
+      ) {
+        errorMessage = err.message;
+        statusCode = 401;
+      }
 
       reply
         .header("Access-Control-Allow-Origin", req.headers.origin)
         .header("Access-Control-Allow-Credentials", "true")
-        .status(500)
+        .status(statusCode)
         .send({
           error: err.name || "SigninError",
-          message: err.message || "Authentication failed",
+          message: errorMessage,
         });
     }
   });

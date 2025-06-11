@@ -3,10 +3,6 @@ import {
   AdminGetUserCommand,
 } from "@aws-sdk/client-cognito-identity-provider";
 
-/**
- * Registers the /auth/checkuser route
- * @param {import('fastify').FastifyInstance} app
- */
 export async function checkUserRoutes(app) {
   app.post("/auth/checkuser", async (req, reply) => {
     const { email } = req.body;
@@ -16,28 +12,44 @@ export async function checkUserRoutes(app) {
     }
 
     const region = process.env.XYVO_REGION;
-    const userPoolId = process.env.COGNITO_USER_POOL_ID;
+    const customerUserPoolId = process.env.COGNITO_USER_POOL_ID;
+    const sellerUserPoolId = process.env.COGNITO_SELLER_POOL_ID;
 
     const cognitoClient = new CognitoIdentityProviderClient({ region });
 
+    const foundAccounts = [];
+
     try {
-      const command = new AdminGetUserCommand({
-        UserPoolId: userPoolId,
+      const customerCommand = new AdminGetUserCommand({
+        UserPoolId: customerUserPoolId,
         Username: email,
       });
 
-      await cognitoClient.send(command);
+      await cognitoClient.send(customerCommand);
 
-      reply
-        .header("Access-Control-Allow-Origin", req.headers.origin)
-        .header("Access-Control-Allow-Credentials", "true")
-        .send({ exists: true });
+      foundAccounts.push({ type: "Customer", poolId: customerUserPoolId });
     } catch (err) {
-      console.error("🔴 Cognito error:", err);
-      reply
-        .header("Access-Control-Allow-Origin", req.headers.origin)
-        .header("Access-Control-Allow-Credentials", "true")
-        .send({ exists: false });
+      if (err.name !== "UserNotFoundException") {
+        console.error("Cognito customer pool error:", err);
+      }
     }
+
+    try {
+      const sellerCommand = new AdminGetUserCommand({
+        UserPoolId: sellerUserPoolId,
+        Username: email,
+      });
+      await cognitoClient.send(sellerCommand);
+      foundAccounts.push({ type: "Seller", poolId: sellerUserPoolId });
+    } catch (err) {
+      if (err.name !== "UserNotFoundException") {
+        console.error("Cognito seller pool error:", err);
+      }
+    }
+
+    reply
+      .header("Access-Control-Allow-Origin", req.headers.origin)
+      .header("Access-Control-Allow-Credentials", "true")
+      .send({ accounts: foundAccounts });
   });
 }

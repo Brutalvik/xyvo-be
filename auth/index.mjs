@@ -1,5 +1,5 @@
+// index.mjs
 import dotenv from "dotenv";
-
 import awsLambdaFastify from "@fastify/aws-lambda";
 import fastify from "fastify";
 import fastifyCors from "@fastify/cors";
@@ -7,27 +7,24 @@ import fastifyCookie from "fastify-cookie";
 
 dotenv.config();
 
-//ROUTES
 import { signinRoutes } from "./routes/signin.mjs";
 import { registerRoutes } from "./routes/register.mjs";
 import { checkUserRoutes } from "./routes/checkuser.mjs";
 import { refreshTokenRoute } from "./routes/refresh.mjs";
 import { meRoute } from "./routes/me.mjs";
 import { signoutRoutes } from "./routes/signout.mjs";
+import { registerSellerRoutes } from "./routes/register-seller.mjs";
+import { socialAuthRoutes } from "./routes/socialAuthRoutes.mjs";
 
 const app = fastify({ logger: true });
 
-// --- CORS Configuration ---
 const allowedOrigins = [
   "http://localhost:3000",
   "https://xyvo.vercel.app",
   "https://www.xyvo.ca",
   "http://www.xyvo.ca",
-  "https://auth.xyvo.ca",
-  "https://products.xyvo.ca",
 ];
 
-// --- CORS Configuration ---
 app.register(fastifyCors, {
   origin: (origin, callback) => {
     if (!origin || allowedOrigins.includes(origin)) {
@@ -43,7 +40,6 @@ app.register(fastifyCors, {
 
 app.register(fastifyCookie);
 
-// Parse JSON bodies
 app.addContentTypeParser(
   "application/json",
   { parseAs: "string" },
@@ -57,30 +53,17 @@ app.addContentTypeParser(
   }
 );
 
-// --- Routes ---
-
-// Register user in Cognito
 await app.register(registerRoutes);
-
-//Check user in Cognito
 await app.register(checkUserRoutes);
-
-// Login: set secure cookie with JWT
 await app.register(signinRoutes);
-
-// Logout: clear cookie
 await app.register(signoutRoutes);
-
-// Authenticated user info
 await app.register(meRoute);
-
-// Refresh token
 await app.register(refreshTokenRoute);
+await app.register(registerSellerRoutes);
+await app.register(socialAuthRoutes);
 
-// --- Lambda Export ---
 export const handler = awsLambdaFastify(app);
 
-// Local dev mode
 if (process.env.NODE_ENV === "development") {
   app.listen({ port: 5000 }, (err) => {
     if (err) {
