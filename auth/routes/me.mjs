@@ -10,10 +10,20 @@ export async function meRoute(app) {
     const token = req.cookies.token;
     const user = verifyToken(token);
 
-    if (!user) {
-      return reply.status(401).send({ message: "Unauthorized" });
+    if (!token || !user) {
+      req.log.warn("Unauthorized access to /auth/me");
+      return reply
+        .clearCookie("x-token", { path: "/" })
+        .header("Access-Control-Allow-Origin", req.headers.origin)
+        .header("Access-Control-Allow-Credentials", "true")
+        .status(401)
+        .send({ message: "Unauthorized" });
     }
 
-    reply.send({ user });
+    reply
+      .header("Access-Control-Allow-Origin", req.headers.origin)
+      .header("Access-Control-Allow-Credentials", "true")
+      .status(200)
+      .send({ user });
   });
 }

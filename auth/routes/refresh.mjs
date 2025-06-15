@@ -1,7 +1,5 @@
-// routes/refresh.mjs
 import jwt from "jsonwebtoken";
 import { getCookieOptions } from "../utils/cookieOptions.mjs";
-// import { calculateSecretHash } from "../utils/helpers.mjs";
 
 /**
  * Registers the /auth/refresh route
@@ -24,17 +22,12 @@ export async function refreshTokenRoute(app) {
     }
 
     if (!clientSecret) {
-      //check for client secret if it's a confidential app
-      console.error(
-        "🔴 Missing COGNITO_CLIENT_SECRET environment variable for confidential client."
-      );
+      console.error("🔴 Missing COGNITO_CLIENT_SECRET env var");
       return reply
         .header("Access-Control-Allow-Origin", req.headers.origin)
         .header("Access-Control-Allow-Credentials", "true")
         .status(500)
-        .send({
-          message: "Server configuration error: Client secret missing.",
-        });
+        .send({ message: "Server error: Client secret missing." });
     }
 
     try {
@@ -58,62 +51,45 @@ export async function refreshTokenRoute(app) {
       const data = await response.json();
 
       if (!response.ok) {
-        console.error("🔴 Cognito OAuth2 Token Refresh Error:", data);
-        let errorMessage =
-          data.error_description || data.error || "Failed to refresh token.";
-        if (data.error === "invalid_grant") {
-          errorMessage = "Session invalid. Please log in again.";
-        } else if (data.error === "invalid_token") {
-          errorMessage = "Session expired or invalid. Please log in again.";
-        } else if (data.error === "unauthorized_client") {
-          errorMessage =
-            "Authentication failed: Invalid client or client secret.";
-        }
+        console.error("🔴 Cognito Refresh Error:", data);
 
         return reply
           .clearCookie("token", getCookieOptions({ includeMaxAge: false }))
+          .clearCookie("x-token", { path: "/" })
           .clearCookie(
             "refreshToken",
-            getCookieOptions({ includeMaxAge: false, path: "/auth/refresh" })
+            getCookieOptions({ path: "/auth/refresh", includeMaxAge: false })
           )
           .header("Access-Control-Allow-Origin", req.headers.origin)
           .header("Access-Control-Allow-Credentials", "true")
           .status(401)
-          .send({ message: errorMessage });
+          .send({ message: data.error_description || "Refresh failed." });
       }
 
-      const newIdToken = data.id_token;
-      const newAccessToken = data.access_token;
-      const newCognitoRefreshToken = data.refresh_token; // Will be present if refresh token rotation is enabled
+      const { id_token, access_token, refresh_token } = data;
 
-      if (!newIdToken || !newAccessToken) {
-        console.error(
-          "🔴 Cognito refresh did not return required tokens despite success status."
-        );
+      if (!id_token || !access_token) {
         return reply
           .clearCookie("token", getCookieOptions({ includeMaxAge: false }))
+          .clearCookie("x-token", { path: "/" })
           .clearCookie(
             "refreshToken",
-            getCookieOptions({ includeMaxAge: false, path: "/auth/refresh" })
+            getCookieOptions({ path: "/auth/refresh", includeMaxAge: false })
           )
           .header("Access-Control-Allow-Origin", req.headers.origin)
           .header("Access-Control-Allow-Credentials", "true")
           .status(401)
-          .send({ message: "Failed to refresh token: Missing new tokens." });
+          .send({ message: "Missing new tokens from Cognito" });
       }
 
-      const userPayload = jwt.decode(newIdToken); // Decode the new ID token to get user info
+      const userPayload = jwt.decode(id_token);
 
       const user = {
         id: userPayload.sub,
         email: userPayload.email,
-        // Add other attributes from userPayload if available and desired in your custom JWT
-        // e.g., name: userPayload.name || userPayload.given_name,
-        // phone: userPayload.phone_number || null,
       };
 
-      //NEW custom JWT from the new Cognito tokens
-      const newJwtToken = jwt.sign(user, jwtSecret, { expiresIn: "1h" }); // custom JWT short-lived
+      const newJwtToken = jwt.sign(user, jwtSecret, { expiresIn: "1h" });
 
       reply
         .setCookie(
@@ -121,34 +97,39 @@ export async function refreshTokenRoute(app) {
           newJwtToken,
           getCookieOptions({ includeMaxAge: true })
         )
+        .setCookie("x-token", newJwtToken, {
+          path: "/",
+          sameSite: "Strict",
+          maxAge: 60 * 60,
+        })
         .setCookie(
           "refreshToken",
-          newCognitoRefreshToken || cognitoRefreshToken,
+          refresh_token || cognitoRefreshToken,
           getCookieOptions({
             includeMaxAge: true,
             maxAge: 30 * 24 * 60 * 60 * 1000,
-            path: "/auth/refresh", // IMPORTANT: Only send this cookie to the refresh endpoint
+            path: "/auth/refresh",
           })
         )
         .header("Access-Control-Allow-Origin", req.headers.origin)
         .header("Access-Control-Allow-Credentials", "true")
         .status(200)
-        .send({ message: "Token refreshed successfully", user });
+        .send({ message: "Token refreshed", user });
     } catch (err) {
-      console.error("🔴 Refresh token general error:", err);
+      console.error("🔴 Refresh error:", err);
       reply
         .clearCookie("token", getCookieOptions({ includeMaxAge: false }))
+        .clearCookie("x-token", { path: "/" })
         .clearCookie(
           "refreshToken",
-          getCookieOptions({ includeMaxAge: false, path: "/auth/refresh" })
+          getCookieOptions({ path: "/auth/refresh", includeMaxAge: false })
         )
         .header("Access-Control-Allow-Origin", req.headers.origin)
         .header("Access-Control-Allow-Credentials", "true")
-        .status(500) // Changed to 500 for unexpected errors during refresh
+        .status(500)
         .send({
           error: "InternalServerError",
-          message:
-            "An unexpected error occurred during token refresh. Please try again or log in.",
+          message: "Unexpected error during token refresh. Please log in.",
         });
     }
   });

@@ -25,8 +25,7 @@ export async function signinRoutes(app) {
           .send({ error: "Email, password, and userPoolId are required" });
       }
 
-      let clientId;
-      let clientSecret;
+      let clientId, clientSecret;
 
       if (userPoolId === process.env.COGNITO_USER_POOL_ID) {
         clientId = process.env.COGNITO_CLIENT_ID;
@@ -52,13 +51,13 @@ export async function signinRoutes(app) {
           PASSWORD: password,
           SECRET_HASH: secretHash,
         },
-        UserPoolId: userPoolId,
       });
 
       const authResponse = await cognitoClient.send(authCommand);
       const idToken = authResponse.AuthenticationResult?.IdToken;
       const accessToken = authResponse.AuthenticationResult?.AccessToken;
       const refreshToken = authResponse.AuthenticationResult?.RefreshToken;
+      const expiresIn = authResponse.AuthenticationResult?.ExpiresIn;
 
       if (!idToken || !accessToken || !refreshToken) {
         return reply
@@ -78,23 +77,30 @@ export async function signinRoutes(app) {
 
       const user = {
         id: attributes.sub,
-        sub: attributes.sub, // ADDED: Ensures the JWT payload has a 'sub' claim
+        sub: attributes.sub,
         email: attributes.email,
         name: attributes.name || attributes.given_name,
-        phone: attributes.phone_number || null,
+        phone: attributes.phone_number || "",
         given_name: attributes.given_name,
         family_name: attributes.family_name,
-        business_name: attributes["custom:business_name"],
+        business_name: attributes["custom:business_name"] || "",
+        preferredLocale: attributes["locale"] || "",
         group:
           userPoolId === process.env.COGNITO_SELLER_POOL_ID
             ? "Sellers"
             : "Customers",
+        accessTokenExpiresAt: Math.floor(Date.now() / 1000) + expiresIn,
       };
 
       const jwtToken = jwt.sign(user, jwtSecret, { expiresIn: "1h" });
 
       reply
         .setCookie("token", jwtToken, getCookieOptions({ includeMaxAge: true }))
+        .setCookie("x-token", jwtToken, {
+          path: "/",
+          sameSite: "Strict",
+          maxAge: 60 * 60,
+        })
         .setCookie(
           "refreshToken",
           refreshToken,
@@ -113,8 +119,6 @@ export async function signinRoutes(app) {
         });
     } catch (err) {
       console.error("Cognito signin error:", err);
-      req.log.error("Cognito signin error:", err?.name || err);
-
       let errorMessage = "Authentication failed";
       let statusCode = 500;
 

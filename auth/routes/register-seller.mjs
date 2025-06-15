@@ -1,6 +1,8 @@
 import pkg from "@aws-sdk/client-cognito-identity-provider";
 import { SellerProfileService } from "../services/sellerProfileService.mjs";
 import { calculateSecretHash } from "../utils/helpers.mjs";
+import jwt from "jsonwebtoken";
+import { getCookieOptions } from "../utils/cookieOptions.mjs";
 
 const {
   CognitoIdentityProviderClient,
@@ -52,21 +54,22 @@ export async function registerSellerRoutes(app) {
         ],
       });
       const signUpResult = await cognitoClient.send(signUpCommand);
-
       const cognitoUserId = signUpResult.UserSub;
 
-      const confirmSignUpCommand = new AdminConfirmSignUpCommand({
-        UserPoolId: process.env.COGNITO_SELLER_POOL_ID,
-        Username: email,
-      });
-      await cognitoClient.send(confirmSignUpCommand);
+      await cognitoClient.send(
+        new AdminConfirmSignUpCommand({
+          UserPoolId: process.env.COGNITO_SELLER_POOL_ID,
+          Username: email,
+        })
+      );
 
-      const addUserToGroupCommand = new AdminAddUserToGroupCommand({
-        UserPoolId: process.env.COGNITO_SELLER_POOL_ID,
-        Username: email,
-        GroupName: "Sellers",
-      });
-      await cognitoClient.send(addUserToGroupCommand);
+      await cognitoClient.send(
+        new AdminAddUserToGroupCommand({
+          UserPoolId: process.env.COGNITO_SELLER_POOL_ID,
+          Username: email,
+          GroupName: "Sellers",
+        })
+      );
 
       const sellerProfile = {
         sellerId: cognitoUserId,
@@ -80,51 +83,77 @@ export async function registerSellerRoutes(app) {
       };
       await sellerProfileService.createSellerProfile(sellerProfile);
 
-      const initiateAuthCommand = new AdminInitiateAuthCommand({
-        UserPoolId: process.env.COGNITO_SELLER_POOL_ID,
-        ClientId: process.env.COGNITO_CLIENT_ID_SELLERS,
-        AuthFlow: "ADMIN_NO_SRP_AUTH",
-        AuthParameters: {
-          USERNAME: email,
-          PASSWORD: password,
-          SECRET_HASH: secretHash,
-        },
-      });
-      const authResponse = await cognitoClient.send(initiateAuthCommand);
-
-      const adminGetUserCommand = new AdminGetUserCommand({
-        UserPoolId: process.env.COGNITO_SELLER_POOL_ID,
-        Username: email,
-      });
-      const adminGetUserResponse = await cognitoClient.send(
-        adminGetUserCommand
+      const authResponse = await cognitoClient.send(
+        new AdminInitiateAuthCommand({
+          UserPoolId: process.env.COGNITO_SELLER_POOL_ID,
+          ClientId: process.env.COGNITO_CLIENT_ID_SELLERS,
+          AuthFlow: "ADMIN_NO_SRP_AUTH",
+          AuthParameters: {
+            USERNAME: email,
+            PASSWORD: password,
+            SECRET_HASH: secretHash,
+          },
+        })
       );
 
-      const userGroups =
-        adminGetUserResponse.UserGroups?.map((group) => group.GroupName) || [];
-      const userAttributes =
-        adminGetUserResponse.UserAttributes?.reduce((acc, attr) => {
-          acc[attr.Name] = attr.Value;
-          return acc;
-        }, {}) || {};
+      const token = authResponse.AuthenticationResult;
+      const idToken = token?.IdToken;
+      const accessToken = token?.AccessToken;
+      const refreshToken = token?.RefreshToken;
 
-      reply.status(201).send({
-        message: "Seller account created and logged in",
-        user: {
-          sub: cognitoUserId,
-          name:
-            `${userAttributes.given_name || ""} ${
-              userAttributes.family_name || ""
-            }`.trim() || email,
-          given_name: userAttributes.given_name,
-          family_name: userAttributes.family_name,
-          email: email,
-          phone_number: userAttributes.phone_number,
-          business_name: userAttributes["custom:business_name"],
-          groups: userGroups,
-        },
-        session: authResponse.AuthenticationResult,
+      if (!idToken || !accessToken || !refreshToken) {
+        return reply.status(401).send({ message: "Missing tokens" });
+      }
+
+      const getUser = await cognitoClient.send(
+        new AdminGetUserCommand({
+          UserPoolId: process.env.COGNITO_SELLER_POOL_ID,
+          Username: email,
+        })
+      );
+
+      const attributes = {};
+      getUser.UserAttributes.forEach((attr) => {
+        attributes[attr.Name] = attr.Value;
       });
+
+      const jwtPayload = {
+        id: attributes.sub,
+        sub: attributes.sub,
+        email: attributes.email,
+        name: `${attributes.given_name || ""} ${
+          attributes.family_name || ""
+        }`.trim(),
+        phone: attributes.phone_number || "",
+        business_name: attributes["custom:business_name"],
+        group: "Sellers",
+      };
+
+      const jwtToken = jwt.sign(jwtPayload, process.env.JWT_SECRET, {
+        expiresIn: "1h",
+      });
+
+      reply
+        .setCookie("token", jwtToken, getCookieOptions({ includeMaxAge: true }))
+        .setCookie("x-token", jwtToken, {
+          path: "/",
+          sameSite: "Strict",
+          maxAge: 60 * 60,
+        })
+        .setCookie(
+          "refreshToken",
+          refreshToken,
+          getCookieOptions({
+            includeMaxAge: true,
+            maxAge: 30 * 24 * 60 * 60 * 1000,
+            path: "/auth/refresh",
+          })
+        )
+        .status(201)
+        .send({
+          message: "Seller registered and logged in successfully",
+          user: jwtPayload,
+        });
     } catch (error) {
       request.log.error("Seller registration error:", error);
       if (error.name === "UsernameExistsException") {

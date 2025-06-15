@@ -44,13 +44,13 @@ export async function registerRoutes(app) {
           { Name: "phone_number", Value: phone },
         ],
       });
-      const signUpResult = await cognitoClient.send(signUpCommand);
+      await cognitoClient.send(signUpCommand);
 
-      const adminConfirmSignUpCommand = new AdminConfirmSignUpCommand({
+      const confirmCommand = new AdminConfirmSignUpCommand({
         UserPoolId: userPoolId,
         Username: email,
       });
-      await cognitoClient.send(adminConfirmSignUpCommand);
+      await cognitoClient.send(confirmCommand);
 
       const authCommand = new InitiateAuthCommand({
         AuthFlow: "USER_PASSWORD_AUTH",
@@ -70,9 +70,10 @@ export async function registerRoutes(app) {
       if (!idToken || !accessToken || !refreshToken) {
         reply
           .clearCookie("token", getCookieOptions({ includeMaxAge: false }))
+          .clearCookie("x-token", { path: "/" })
           .clearCookie(
             "refreshToken",
-            getCookieOptions({ includeMaxAge: false, path: "/auth/refresh" })
+            getCookieOptions({ path: "/auth/refresh", includeMaxAge: false })
           );
         return reply
           .header("Access-Control-Allow-Origin", req.headers.origin)
@@ -94,7 +95,7 @@ export async function registerRoutes(app) {
 
       const user = {
         id: attributes.sub,
-        sub: attributes.sub, // ADDED: Ensures the JWT payload has a 'sub' claim
+        sub: attributes.sub,
         email: attributes.email,
         name: attributes.name || attributes.given_name,
         phone: attributes.phone_number || null,
@@ -104,6 +105,11 @@ export async function registerRoutes(app) {
 
       reply
         .setCookie("token", jwtToken, getCookieOptions({ includeMaxAge: true }))
+        .setCookie("x-token", jwtToken, {
+          path: "/",
+          sameSite: "Strict",
+          maxAge: 60 * 60,
+        })
         .setCookie(
           "refreshToken",
           refreshToken,
