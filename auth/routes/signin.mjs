@@ -51,13 +51,14 @@ export async function signinRoutes(app) {
           PASSWORD: password,
           SECRET_HASH: secretHash,
         },
+        UserPoolId: userPoolId,
       });
 
       const authResponse = await cognitoClient.send(authCommand);
       const idToken = authResponse.AuthenticationResult?.IdToken;
       const accessToken = authResponse.AuthenticationResult?.AccessToken;
       const refreshToken = authResponse.AuthenticationResult?.RefreshToken;
-      const expiresIn = authResponse.AuthenticationResult?.ExpiresIn;
+      const expiresIn = authResponse.AuthenticationResult?.ExpiresIn; // seconds
 
       if (!idToken || !accessToken || !refreshToken) {
         return reply
@@ -97,9 +98,8 @@ export async function signinRoutes(app) {
       reply
         .setCookie("token", jwtToken, getCookieOptions({ includeMaxAge: true }))
         .setCookie("x-token", jwtToken, {
-          path: "/",
-          sameSite: "Strict",
-          maxAge: 60 * 60,
+          ...getCookieOptions({ includeMaxAge: true }),
+          httpOnly: false,
         })
         .setCookie(
           "refreshToken",
@@ -119,6 +119,8 @@ export async function signinRoutes(app) {
         });
     } catch (err) {
       console.error("Cognito signin error:", err);
+      req.log.error("Cognito signin error:", err?.name || err);
+
       let errorMessage = "Authentication failed";
       let statusCode = 500;
 

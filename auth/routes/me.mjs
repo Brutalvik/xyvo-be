@@ -8,22 +8,33 @@ import { verifyToken } from "../utils/helpers.mjs";
 export async function meRoute(app) {
   app.get("/auth/me", async (req, reply) => {
     const token = req.cookies.token;
-    const user = verifyToken(token);
 
-    if (!token || !user) {
-      req.log.warn("Unauthorized access to /auth/me");
+    if (!token) {
+      req.log.warn("No token provided.");
       return reply
         .clearCookie("x-token", { path: "/" })
+        .status(401)
         .header("Access-Control-Allow-Origin", req.headers.origin)
         .header("Access-Control-Allow-Credentials", "true")
-        .status(401)
         .send({ message: "Unauthorized" });
     }
 
-    reply
+    const user = verifyToken(token);
+
+    if (!user) {
+      req.log.warn("Invalid token.");
+      return reply
+        .clearCookie("x-token", { path: "/" })
+        .status(401)
+        .header("Access-Control-Allow-Origin", req.headers.origin)
+        .header("Access-Control-Allow-Credentials", "true")
+        .send({ message: "Unauthorized" });
+    }
+
+    return reply
+      .status(200)
       .header("Access-Control-Allow-Origin", req.headers.origin)
       .header("Access-Control-Allow-Credentials", "true")
-      .status(200)
       .send({ user });
   });
 }

@@ -98,9 +98,8 @@ export async function refreshTokenRoute(app) {
           getCookieOptions({ includeMaxAge: true })
         )
         .setCookie("x-token", newJwtToken, {
-          path: "/",
-          sameSite: "Strict",
-          maxAge: 60 * 60,
+          ...getCookieOptions({ includeMaxAge: true }),
+          httpOnly: false,
         })
         .setCookie(
           "refreshToken",

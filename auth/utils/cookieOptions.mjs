@@ -6,7 +6,7 @@ export function getCookieOptions({ includeMaxAge = false } = {}) {
     sameSite: isProd ? "none" : "lax",
     secure: isProd,
     path: "/",
-    domain: isProd ? "xyvo.ca" : "localhost",
+    domain: isProd ? ".xyvo.ca" : "localhost",
   };
 
   if (includeMaxAge) {
