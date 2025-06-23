@@ -3,28 +3,42 @@ import {
   AdminGetUserCommand,
   AdminAddUserToGroupCommand,
 } from "@aws-sdk/client-cognito-identity-provider";
+import { jwtVerify, createRemoteJWKSet } from "jose";
 import jwt from "jsonwebtoken";
+import { getCookieOptions } from "../utils/cookieOptions.mjs";
 
 export async function socialAuthRoutes(app) {
   app.post("/auth/process-social-login", async (req, reply) => {
     const { code } = req.body;
+
     const region = process.env.XYVO_REGION;
     const customerUserPoolId = process.env.COGNITO_USER_POOL_ID;
     const sellerUserPoolId = process.env.COGNITO_SELLER_POOL_ID;
-    const cognitoClient = new CognitoIdentityProviderClient({ region });
-
+    const clientId = process.env.COGNITO_CLIENT_ID;
+    const clientSecret = process.env.COGNITO_CLIENT_SECRET;
     const redirectUri = process.env.FRONTEND_SOCIAL_CALLBACK_URL;
+    const cognitoHostedUiDomain = process.env.COGNITO_HOSTED_UI_DOMAIN;
+    const jwtSecret = process.env.JWT_SECRET;
+
+    const origin = req.headers.origin;
+
+    if (!cognitoHostedUiDomain) {
+      return reply
+        .header("Access-Control-Allow-Origin", origin)
+        .header("Access-Control-Allow-Credentials", "true")
+        .status(500)
+        .send({ message: "Cognito Hosted UI domain not configured." });
+    }
+
+    const cognitoClient = new CognitoIdentityProviderClient({ region });
 
     let cognitoTokens;
     let idTokenPayload;
-    let socialIdpType = "Google";
+    const socialIdpType = "Google"; // This can be dynamic based on the social login provider
 
     try {
-      const clientId = process.env.COGNITO_CLIENT_ID;
-      const clientSecret = process.env.COGNITO_CLIENT_SECRET;
-
       const tokenResponse = await fetch(
-        `https://${process.env.NEXT_PUBLIC_COGNITO_CUSTOMER_DOMAIN}.auth.${region}.amazoncognito.com/oauth2/token`,
+        `https://${cognitoHostedUiDomain}/oauth2/token`,
         {
           method: "POST",
           headers: {
@@ -44,25 +58,37 @@ export async function socialAuthRoutes(app) {
 
       if (!tokenResponse.ok) {
         const errorData = await tokenResponse.json();
-        console.error("Google social login token exchange failed:", errorData);
-        throw new Error(
-          errorData.error_description || "Failed to exchange code for tokens."
-        );
+        return reply
+          .header("Access-Control-Allow-Origin", origin)
+          .header("Access-Control-Allow-Credentials", "true")
+          .status(400)
+          .send({
+            message: errorData.error_description || "Token exchange failed",
+          });
       }
 
       cognitoTokens = await tokenResponse.json();
-      idTokenPayload = jwt.decode(cognitoTokens.id_token);
-    } catch (error) {
-      console.error("Social login token exchange failed:", error);
-      return reply.status(400).send({
-        message: "Failed to authenticate with social provider",
-        error: error.message,
+
+      const jwksUri = `https://cognito-idp.${region}.amazonaws.com/${customerUserPoolId}/.well-known/jwks.json`;
+      const JWKS = createRemoteJWKSet(new URL(jwksUri));
+      const { payload } = await jwtVerify(cognitoTokens.id_token, JWKS, {
+        audience: clientId,
       });
+
+      idTokenPayload = payload;
+    } catch (error) {
+      return reply
+        .header("Access-Control-Allow-Origin", origin)
+        .header("Access-Control-Allow-Credentials", "true")
+        .status(400)
+        .send({
+          message: "Social login failed",
+          error: error.message,
+        });
     }
 
     const email = idTokenPayload.email;
     const cognitoUserSub = idTokenPayload.sub;
-
     let existingAccounts = [];
 
     try {
@@ -72,10 +98,23 @@ export async function socialAuthRoutes(app) {
           Username: email,
         })
       );
-      if (customerUser.UserAttributes)
+      if (customerUser.UserAttributes) {
         existingAccounts.push({ type: "Customer", poolId: customerUserPoolId });
-    } catch (err) {
-      /* User not found is expected */
+      }
+    } catch {
+      // User not found in Customer pool
+      if (existingAccounts.length > 0) {
+        return reply
+          .header("Access-Control-Allow-Origin", origin)
+          .header("Access-Control-Allow-Credentials", "true")
+          .send({
+            needsSignupChoice: false,
+            email,
+            socialIdp: socialIdpType,
+            cognitoUserSub,
+            accountType: existingAccounts[0].type,
+          });
+      }
     }
 
     try {
@@ -85,47 +124,69 @@ export async function socialAuthRoutes(app) {
           Username: email,
         })
       );
-      if (sellerUser.UserAttributes)
+      if (sellerUser.UserAttributes) {
         existingAccounts.push({ type: "Seller", poolId: sellerUserPoolId });
-    } catch (err) {
-      /* User not found is expected */
+      }
+    } catch {
+      // User not found in Seller pool
+      if (existingAccounts.length > 0) {
+        return reply
+          .header("Access-Control-Allow-Origin", origin)
+          .header("Access-Control-Allow-Credentials", "true")
+          .send({
+            needsSignupChoice: false,
+            email,
+            socialIdp: socialIdpType,
+            cognitoUserSub,
+            accountType: existingAccounts[0].type,
+          });
+      }
     }
 
-    if (existingAccounts.length === 0) {
-      return reply.send({
+    return reply
+      .header("Access-Control-Allow-Origin", origin)
+      .header("Access-Control-Allow-Credentials", "true")
+      .send({
         needsSignupChoice: true,
         email,
         socialIdp: socialIdpType,
         cognitoUserSub,
       });
-    } else {
-      return reply.send({
-        needsSignupChoice: true,
-        email,
-        socialIdp: socialIdpType,
-        cognitoUserSub,
-      });
-    }
   });
 
   app.post("/auth/complete-social-signup", async (req, reply) => {
     const { email, accountType, socialIdp, cognitoUserSub } = req.body;
-    const region = process.env.XYVO_REGION;
-    const cognitoClient = new CognitoIdentityProviderClient({ region });
 
-    if (!email || !accountType || !socialIdp || !cognitoUserSub) {
+    const cognitoClient = new CognitoIdentityProviderClient({ region });
+    const origin = req.headers.origin;
+
+    if (!accountType) {
       return reply
+        .header("Access-Control-Allow-Origin", origin)
+        .header("Access-Control-Allow-Credentials", "true")
         .status(400)
-        .send({ message: "Missing required information for social signup." });
+        .send({ message: "Account type is required." });
+    }
+
+    if (!email || !socialIdp || !cognitoUserSub) {
+      return reply
+        .header("Access-Control-Allow-Origin", origin)
+        .header("Access-Control-Allow-Credentials", "true")
+        .status(400)
+        .send({ message: "Missing required signup fields." });
     }
 
     let userPoolId;
     if (accountType === "Customer") {
-      userPoolId = process.env.COGNITO_USER_POOL_ID;
+      userPoolId = customerUserPoolId;
     } else if (accountType === "Seller") {
-      userPoolId = process.env.COGNITO_SELLER_POOL_ID;
+      userPoolId = sellerUserPoolId;
     } else {
-      return reply.status(400).send({ message: "Invalid account type." });
+      return reply
+        .header("Access-Control-Allow-Origin", origin)
+        .header("Access-Control-Allow-Credentials", "true")
+        .status(400)
+        .send({ message: "Invalid account type." });
     }
 
     try {
@@ -146,26 +207,57 @@ export async function socialAuthRoutes(app) {
         );
       }
 
-      const finalUser = {
+      const attrs = userDetails.UserAttributes.reduce((acc, attr) => {
+        acc[attr.Name] = attr.Value;
+        return acc;
+      }, {});
+
+      const name =
+        attrs.name ||
+        `${attrs.given_name || ""} ${attrs.family_name || ""}`.trim();
+
+      const user = {
         id: userDetails.Username,
-        email: email,
-        name: userDetails.UserAttributes.find((attr) => attr.Name === "name")
-          ?.Value,
-        accountType: accountType,
+        email,
+        name,
+        accountType,
+        group: accountType === "Seller" ? "Sellers" : "Customers",
       };
 
-      return reply.send({
-        isLoggedIn: true,
-        user: finalUser,
-        message: `Successfully registered as ${accountType}`,
-        redirectTo: "/",
-      });
+      const jwtToken = jwt.sign(user, jwtSecret, { expiresIn: "1h" });
+
+      reply
+        .setCookie("token", jwtToken, getCookieOptions({ includeMaxAge: true }))
+        .setCookie("x-token", jwtToken, {
+          ...getCookieOptions({ includeMaxAge: true }),
+          httpOnly: false,
+        })
+        .setCookie(
+          "refreshToken",
+          cognitoUserSub,
+          getCookieOptions({
+            includeMaxAge: true,
+            maxAge: 30 * 24 * 60 * 60 * 1000,
+            path: "/auth/refresh",
+          })
+        )
+        .header("Access-Control-Allow-Origin", origin)
+        .header("Access-Control-Allow-Credentials", "true")
+        .send({
+          isLoggedIn: true,
+          user,
+          message: `Successfully registered as ${accountType}`,
+          redirectTo: "/",
+        });
     } catch (error) {
-      console.error("Error completing social signup:", error);
-      return reply.status(500).send({
-        message: "Failed to complete social signup",
-        details: error.message,
-      });
+      return reply
+        .header("Access-Control-Allow-Origin", origin)
+        .header("Access-Control-Allow-Credentials", "true")
+        .status(500)
+        .send({
+          message: "Failed to complete social signup",
+          details: error.message,
+        });
     }
   });
 }

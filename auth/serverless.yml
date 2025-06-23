@@ -94,6 +94,20 @@ functions:
       - http:
           path: auth/refresh
           method: options
+      # Social Signup Completion (adds user to group)
+      - http:
+          path: auth/process-social-login
+          method: post
+      - http:
+          path: auth/process-social-login
+          method: options
+
+      - http:
+          path: auth/complete-social-signup
+          method: post
+      - http:
+          path: auth/complete-social-signup
+          method: options
 
 package:
   individually: true
