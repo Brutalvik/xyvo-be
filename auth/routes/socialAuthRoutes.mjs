@@ -2,10 +2,12 @@ import {
   CognitoIdentityProviderClient,
   AdminGetUserCommand,
   AdminAddUserToGroupCommand,
+  AdminUpdateUserAttributesCommand,
 } from "@aws-sdk/client-cognito-identity-provider";
 import { jwtVerify, createRemoteJWKSet } from "jose";
 import jwt from "jsonwebtoken";
 import { getCookieOptions } from "../utils/cookieOptions.mjs";
+import { formatPhoneE164 } from "../utils/helpers.mjs";
 
 export async function socialAuthRoutes(app) {
   app.post("/auth/process-social-login", async (req, reply) => {
@@ -34,7 +36,7 @@ export async function socialAuthRoutes(app) {
 
     let cognitoTokens;
     let idTokenPayload;
-    const socialIdpType = "Google"; // This can be dynamic based on the social login provider
+    const socialIdpType = "Google";
 
     try {
       const tokenResponse = await fetch(
@@ -50,7 +52,7 @@ export async function socialAuthRoutes(app) {
           body: new URLSearchParams({
             grant_type: "authorization_code",
             client_id: clientId,
-            code: code,
+            code,
             redirect_uri: redirectUri,
           }).toString(),
         }
@@ -74,7 +76,7 @@ export async function socialAuthRoutes(app) {
       const { payload } = await jwtVerify(cognitoTokens.id_token, JWKS, {
         audience: clientId,
       });
-
+      console.log("ID token payload:", payload);
       idTokenPayload = payload;
     } catch (error) {
       return reply
@@ -89,86 +91,61 @@ export async function socialAuthRoutes(app) {
 
     const email = idTokenPayload.email;
     const cognitoUserSub = idTokenPayload.sub;
-    let existingAccounts = [];
+    const existingAccounts = [];
 
     try {
-      const customerUser = await cognitoClient.send(
+      await cognitoClient.send(
         new AdminGetUserCommand({
           UserPoolId: customerUserPoolId,
-          Username: email,
+          email: email,
         })
       );
-      if (customerUser.UserAttributes) {
-        existingAccounts.push({ type: "Customer", poolId: customerUserPoolId });
-      }
-    } catch {
-      // User not found in Customer pool
-      if (existingAccounts.length > 0) {
-        return reply
-          .header("Access-Control-Allow-Origin", origin)
-          .header("Access-Control-Allow-Credentials", "true")
-          .send({
-            needsSignupChoice: false,
-            email,
-            socialIdp: socialIdpType,
-            cognitoUserSub,
-            accountType: existingAccounts[0].type,
-          });
-      }
-    }
+      existingAccounts.push({ type: "buyer", poolId: customerUserPoolId });
+    } catch {}
 
     try {
-      const sellerUser = await cognitoClient.send(
+      await cognitoClient.send(
         new AdminGetUserCommand({
           UserPoolId: sellerUserPoolId,
-          Username: email,
+          email: email,
         })
       );
-      if (sellerUser.UserAttributes) {
-        existingAccounts.push({ type: "Seller", poolId: sellerUserPoolId });
-      }
-    } catch {
-      // User not found in Seller pool
-      if (existingAccounts.length > 0) {
-        return reply
-          .header("Access-Control-Allow-Origin", origin)
-          .header("Access-Control-Allow-Credentials", "true")
-          .send({
-            needsSignupChoice: false,
-            email,
-            socialIdp: socialIdpType,
-            cognitoUserSub,
-            accountType: existingAccounts[0].type,
-          });
-      }
-    }
+      existingAccounts.push({ type: "seller", poolId: sellerUserPoolId });
+    } catch {}
 
     return reply
       .header("Access-Control-Allow-Origin", origin)
       .header("Access-Control-Allow-Credentials", "true")
-      .send({
-        needsSignupChoice: true,
-        email,
-        socialIdp: socialIdpType,
-        cognitoUserSub,
-      });
+      .send(
+        existingAccounts.length > 0
+          ? {
+              needsSignupChoice: false,
+              email,
+              socialIdp: socialIdpType,
+              cognitoUserSub,
+              accountType: existingAccounts[0].type,
+            }
+          : {
+              needsSignupChoice: true,
+              email,
+              socialIdp: socialIdpType,
+              cognitoUserSub,
+            }
+      );
   });
 
   app.post("/auth/complete-social-signup", async (req, reply) => {
-    const { email, accountType, socialIdp, cognitoUserSub } = req.body;
+    const { email, accountType, socialIdp, cognitoUserSub, phone } = req.body;
+    console.log("Complete social signup request:", req.body);
 
-    const cognitoClient = new CognitoIdentityProviderClient({ region });
     const origin = req.headers.origin;
+    const region = process.env.XYVO_REGION;
+    const jwtSecret = process.env.JWT_SECRET;
+    const customerUserPoolId = process.env.COGNITO_USER_POOL_ID;
+    const sellerUserPoolId = process.env.COGNITO_SELLER_POOL_ID;
+    const cognitoClient = new CognitoIdentityProviderClient({ region });
 
-    if (!accountType) {
-      return reply
-        .header("Access-Control-Allow-Origin", origin)
-        .header("Access-Control-Allow-Credentials", "true")
-        .status(400)
-        .send({ message: "Account type is required." });
-    }
-
-    if (!email || !socialIdp || !cognitoUserSub) {
+    if (!email || !accountType || !socialIdp || !cognitoUserSub || !phone) {
       return reply
         .header("Access-Control-Allow-Origin", origin)
         .header("Access-Control-Allow-Credentials", "true")
@@ -176,12 +153,20 @@ export async function socialAuthRoutes(app) {
         .send({ message: "Missing required signup fields." });
     }
 
-    let userPoolId;
-    if (accountType === "Customer") {
-      userPoolId = customerUserPoolId;
-    } else if (accountType === "Seller") {
-      userPoolId = sellerUserPoolId;
-    } else {
+    const poolMap = {
+      buyer: customerUserPoolId,
+      seller: sellerUserPoolId,
+    };
+
+    const groupMap = {
+      buyer: "Buyers",
+      seller: "Sellers",
+    };
+
+    const userPoolId = poolMap[accountType];
+    const groupName = groupMap[accountType];
+
+    if (!userPoolId || !groupName) {
       return reply
         .header("Access-Control-Allow-Origin", origin)
         .header("Access-Control-Allow-Credentials", "true")
@@ -190,27 +175,40 @@ export async function socialAuthRoutes(app) {
     }
 
     try {
-      const userDetails = await cognitoClient.send(
-        new AdminGetUserCommand({
+      // 🔐 Update the user's phone number in Cognito
+      await cognitoClient.send(
+        new AdminUpdateUserAttributesCommand({
           UserPoolId: userPoolId,
-          Username: email,
+          Username: cognitoUserSub,
+          UserAttributes: [
+            { Name: "phone_number", Value: formatPhoneE164(phone) },
+          ],
         })
       );
 
-      if (accountType === "Seller") {
-        await cognitoClient.send(
-          new AdminAddUserToGroupCommand({
-            UserPoolId: userPoolId,
-            Username: email,
-            GroupName: "Sellers",
-          })
-        );
-      }
+      // ✅ Add user to the appropriate group
+      await cognitoClient.send(
+        new AdminAddUserToGroupCommand({
+          UserPoolId: userPoolId,
+          Username: cognitoUserSub,
+          GroupName: groupName,
+        })
+      );
 
-      const attrs = userDetails.UserAttributes.reduce((acc, attr) => {
-        acc[attr.Name] = attr.Value;
-        return acc;
-      }, {});
+      // 🧾 Fetch user details
+      const userDetails = await cognitoClient.send(
+        new AdminGetUserCommand({
+          UserPoolId: userPoolId,
+          Username: cognitoUserSub,
+        })
+      );
+
+      const attrs = Object.fromEntries(
+        (userDetails.UserAttributes || []).map(({ Name, Value }) => [
+          Name,
+          Value,
+        ])
+      );
 
       const name =
         attrs.name ||
@@ -220,8 +218,11 @@ export async function socialAuthRoutes(app) {
         id: userDetails.Username,
         email,
         name,
-        accountType,
-        group: accountType === "Seller" ? "Sellers" : "Customers",
+        type: accountType,
+        group: groupName,
+        phone: attrs.phone_number || phone,
+        sub: cognitoUserSub,
+        socialIdp,
       };
 
       const jwtToken = jwt.sign(user, jwtSecret, { expiresIn: "1h" });
@@ -250,6 +251,7 @@ export async function socialAuthRoutes(app) {
           redirectTo: "/",
         });
     } catch (error) {
+      console.error("Social signup error:", error);
       return reply
         .header("Access-Control-Allow-Origin", origin)
         .header("Access-Control-Allow-Credentials", "true")

@@ -80,6 +80,7 @@ export async function registerSellerRoutes(app) {
         contactFirstName: firstName,
         contactLastName: lastName,
         createdAt: new Date().toISOString(),
+        type: "seller",
       };
       await sellerProfileService.createSellerProfile(sellerProfile);
 
@@ -126,7 +127,7 @@ export async function registerSellerRoutes(app) {
         }`.trim(),
         phone: attributes.phone_number || "",
         business_name: attributes["custom:business_name"],
-        group: "Sellers",
+        accountType: attributes.type,
       };
 
       const jwtToken = jwt.sign(jwtPayload, process.env.JWT_SECRET, {

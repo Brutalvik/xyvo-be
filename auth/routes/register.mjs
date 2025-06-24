@@ -37,6 +37,7 @@ export async function registerRoutes(app) {
         Username: email,
         Password: password,
         SecretHash: secretHash,
+        type: "buyer",
         UserAttributes: [
           { Name: "email", Value: email },
           { Name: "name", Value: name },
@@ -99,6 +100,8 @@ export async function registerRoutes(app) {
         email: attributes.email,
         name: attributes.name || attributes.given_name,
         phone: attributes.phone_number || null,
+        accountType: attributes.type,
+        attributes,
       };
 
       const jwtToken = jwt.sign(user, jwtSecret, { expiresIn: "1h" });

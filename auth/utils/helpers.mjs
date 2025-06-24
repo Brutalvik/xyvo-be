@@ -20,3 +20,8 @@ export function verifyToken(token) {
     return null;
   }
 }
+
+export const formatPhoneE164 = (raw) => {
+  const digits = raw.replace(/\D/g, ""); // Remove non-numeric characters
+  return `+${digits}`;
+};
