@@ -1,135 +1,84 @@
+// routes/refresh.mjs
+import {
+  CognitoIdentityProviderClient,
+  AdminGetUserCommand,
+} from "@aws-sdk/client-cognito-identity-provider";
 import jwt from "jsonwebtoken";
 import { getCookieOptions } from "../utils/cookieOptions.mjs";
 
-/**
- * Registers the /auth/refresh route
- * @param {import('fastify').FastifyInstance} app
- */
-export async function refreshTokenRoute(app) {
-  app.post("/auth/refresh", async (req, reply) => {
-    const cognitoRefreshToken = req.cookies.refreshToken;
-    const jwtSecret = process.env.JWT_SECRET;
-    const region = process.env.XYVO_REGION;
-    const clientId = process.env.COGNITO_CLIENT_ID;
-    const clientSecret = process.env.COGNITO_CLIENT_SECRET;
+export async function refreshRoute(app) {
+  const region = process.env.XYVO_REGION;
+  const userPoolId = process.env.COGNITO_USER_POOL_ID;
+  const jwtSecret = process.env.JWT_SECRET;
+  const cognitoClient = new CognitoIdentityProviderClient({ region });
 
-    if (!cognitoRefreshToken) {
+  app.post("/auth/refresh", async (req, reply) => {
+    const origin = req.headers.origin;
+    const refreshToken = req.cookies?.refreshToken;
+
+    if (!refreshToken) {
       return reply
-        .header("Access-Control-Allow-Origin", req.headers.origin)
+        .header("Access-Control-Allow-Origin", origin)
         .header("Access-Control-Allow-Credentials", "true")
         .status(401)
-        .send({ message: "No refresh token provided. Please log in again." });
-    }
-
-    if (!clientSecret) {
-      console.error("🔴 Missing COGNITO_CLIENT_SECRET env var");
-      return reply
-        .header("Access-Control-Allow-Origin", req.headers.origin)
-        .header("Access-Control-Allow-Credentials", "true")
-        .status(500)
-        .send({ message: "Server error: Client secret missing." });
+        .send({ message: "Refresh token missing" });
     }
 
     try {
-      const tokenEndpoint = `https://cognito-idp.${region}.amazonaws.com/${process.env.COGNITO_USER_POOL_ID}/oauth2/token`;
+      const decoded = jwt.verify(refreshToken, jwtSecret);
 
-      const requestBody = new URLSearchParams({
-        grant_type: "refresh_token",
-        client_id: clientId,
-        client_secret: clientSecret,
-        refresh_token: cognitoRefreshToken,
-      });
+      const userDetails = await cognitoClient.send(
+        new AdminGetUserCommand({
+          UserPoolId: userPoolId,
+          Username: decoded.sub,
+        })
+      );
 
-      const response = await fetch(tokenEndpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: requestBody.toString(),
-      });
+      const attrs = Object.fromEntries(
+        (userDetails.UserAttributes || []).map(({ Name, Value }) => [
+          Name,
+          Value,
+        ])
+      );
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        console.error("🔴 Cognito Refresh Error:", data);
-
-        return reply
-          .clearCookie("token", getCookieOptions({ includeMaxAge: false }))
-          .clearCookie("x-token", { path: "/" })
-          .clearCookie(
-            "refreshToken",
-            getCookieOptions({ path: "/auth/refresh", includeMaxAge: false })
-          )
-          .header("Access-Control-Allow-Origin", req.headers.origin)
-          .header("Access-Control-Allow-Credentials", "true")
-          .status(401)
-          .send({ message: data.error_description || "Refresh failed." });
-      }
-
-      const { id_token, access_token, refresh_token } = data;
-
-      if (!id_token || !access_token) {
-        return reply
-          .clearCookie("token", getCookieOptions({ includeMaxAge: false }))
-          .clearCookie("x-token", { path: "/" })
-          .clearCookie(
-            "refreshToken",
-            getCookieOptions({ path: "/auth/refresh", includeMaxAge: false })
-          )
-          .header("Access-Control-Allow-Origin", req.headers.origin)
-          .header("Access-Control-Allow-Credentials", "true")
-          .status(401)
-          .send({ message: "Missing new tokens from Cognito" });
-      }
-
-      const userPayload = jwt.decode(id_token);
+      const fullName =
+        attrs.name ||
+        `${attrs.given_name || ""} ${attrs.family_name || ""}`.trim() ||
+        decoded.email.split("@")[0];
 
       const user = {
-        id: userPayload.sub,
-        email: userPayload.email,
+        id: decoded.sub,
+        email: attrs.email || decoded.email,
+        name: fullName,
+        phone: attrs.phone_number,
+        sub: decoded.sub,
+        socialIdp: decoded.socialIdp || null,
+        organizationId: attrs["custom:organization_id"] || null,
+        role: attrs["custom:role"] || "individual",
       };
 
-      const newJwtToken = jwt.sign(user, jwtSecret, { expiresIn: "1h" });
+      const newAccessToken = jwt.sign(user, jwtSecret, { expiresIn: "1h" });
 
-      reply
+      return reply
         .setCookie(
           "token",
-          newJwtToken,
+          newAccessToken,
           getCookieOptions({ includeMaxAge: true })
         )
-        .setCookie("x-token", newJwtToken, {
+        .setCookie("x-token", newAccessToken, {
           ...getCookieOptions({ includeMaxAge: true }),
           httpOnly: false,
         })
-        .setCookie(
-          "refreshToken",
-          refresh_token || cognitoRefreshToken,
-          getCookieOptions({
-            includeMaxAge: true,
-            maxAge: 30 * 24 * 60 * 60 * 1000,
-            path: "/auth/refresh",
-          })
-        )
-        .header("Access-Control-Allow-Origin", req.headers.origin)
+        .header("Access-Control-Allow-Origin", origin)
         .header("Access-Control-Allow-Credentials", "true")
-        .status(200)
-        .send({ message: "Token refreshed", user });
+        .send({ isLoggedIn: true, user });
     } catch (err) {
-      console.error("🔴 Refresh error:", err);
-      reply
-        .clearCookie("token", getCookieOptions({ includeMaxAge: false }))
-        .clearCookie("x-token", { path: "/" })
-        .clearCookie(
-          "refreshToken",
-          getCookieOptions({ path: "/auth/refresh", includeMaxAge: false })
-        )
-        .header("Access-Control-Allow-Origin", req.headers.origin)
+      console.error("Refresh token error:", err);
+      return reply
+        .header("Access-Control-Allow-Origin", origin)
         .header("Access-Control-Allow-Credentials", "true")
-        .status(500)
-        .send({
-          error: "InternalServerError",
-          message: "Unexpected error during token refresh. Please log in.",
-        });
+        .status(401)
+        .send({ message: "Invalid refresh token" });
     }
   });
 }

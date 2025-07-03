@@ -3,13 +3,14 @@ export function getCookieOptions({ includeMaxAge = false } = {}) {
 
   const options = {
     httpOnly: true,
-    sameSite: isProd ? "none" : "lax",
+    sameSite: isProd ? "None" : "Lax",
     secure: isProd,
     path: "/",
     domain: isProd ? ".xyvo.ca" : "localhost",
   };
 
   if (includeMaxAge) {
+    // 1 hour in seconds
     options.maxAge = 3600;
   }
 

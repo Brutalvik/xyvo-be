@@ -7,20 +7,18 @@ import fastifyCookie from "fastify-cookie";
 
 dotenv.config();
 
-import { signinRoutes } from "./routes/signin.mjs";
-import { registerRoutes } from "./routes/register.mjs";
-import { checkUserRoutes } from "./routes/checkuser.mjs";
-import { refreshTokenRoute } from "./routes/refresh.mjs";
+import { signupRoute } from "./routes/signup.mjs";
+import { socialAuthRoute } from "./routes/socialAuthRoutes.mjs";
+import { signinRoute } from "./routes/signin.mjs";
+import { refreshRoute } from "./routes/refresh.mjs";
 import { meRoute } from "./routes/me.mjs";
-import { signoutRoutes } from "./routes/signout.mjs";
-import { registerSellerRoutes } from "./routes/register-seller.mjs";
-import { socialAuthRoutes } from "./routes/socialAuthRoutes.mjs";
+import { signoutRoute } from "./routes/signout.mjs";
 
 const app = fastify({ logger: true });
 
 const allowedOrigins = [
   "http://localhost:3000",
-  "https://xyvo.vercel.app",
+  "https://xyvoai.vercel.app",
   "https://www.xyvo.ca",
   "http://www.xyvo.ca",
 ];
@@ -53,14 +51,12 @@ app.addContentTypeParser(
   }
 );
 
-await app.register(registerRoutes);
-await app.register(checkUserRoutes);
-await app.register(signinRoutes);
-await app.register(signoutRoutes);
+await app.register(signupRoute);
+await app.register(socialAuthRoute);
+await app.register(refreshRoute);
+await app.register(signinRoute);
 await app.register(meRoute);
-await app.register(refreshTokenRoute);
-await app.register(registerSellerRoutes);
-await app.register(socialAuthRoutes);
+await app.register(signoutRoute);
 
 export const handler = awsLambdaFastify(app);
 

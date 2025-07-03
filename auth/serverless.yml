@@ -8,13 +8,13 @@ provider:
   timeout: 15
 
   environment:
+    NODE_ENV: ${env:NODE_ENV}
     XYVO_REGION: us-east-2
     COGNITO_USER_POOL_ID: ${env:COGNITO_USER_POOL_ID}
     COGNITO_CLIENT_ID: ${env:COGNITO_CLIENT_ID}
     COGNITO_CLIENT_SECRET: ${env:COGNITO_CLIENT_SECRET}
     JWT_SECRET: ${env:JWT_SECRET}
-    PRODUCTS_REGION: us-east-2 # Assuming this was your PRODUCTS_REGION in the backend code
-    SELLERS_TABLE_NAME: ${env:SELLERS_TABLE_NAME} # Assuming this is also an env variable
+    ACCOUNT_ID: ${env:ACCOUNT_ID}
 
   iamRoleStatements:
     - Effect: "Allow"
@@ -22,86 +22,52 @@ provider:
         - "cognito-idp:AdminGetUser"
         - "cognito-idp:InitiateAuth"
         - "cognito-idp:SignUp"
-        - "cognito-idp:AdminConfirmSignUp" # Added as per your backend code
-        - "cognito-idp:AdminAddUserToGroup" # Added as per your backend code
+        - "cognito-idp:AdminConfirmSignUp"
+        - "cognito-idp:AdminAddUserToGroup"
         - "cognito-idp:RevokeToken"
-        - "cognito-idp:AdminInitiateAuth" # Added as per your backend code
-      Resource: "arn:aws:cognito-idp:${self:provider.region}:*:userpool/${env:COGNITO_USER_POOL_ID}"
-    - Effect: "Allow"
-      Action:
-        - "dynamodb:PutItem" # Needed for createSellerProfile
-        - "dynamodb:UpdateItem"
-        - "dynamodb:GetItem"
-        - "dynamodb:Query"
-      Resource: "arn:aws:dynamodb:${self:provider.region}:*:table/${env:SELLERS_TABLE_NAME}" # Needed for SellerProfileService
+        - "cognito-idp:AdminInitiateAuth"
+      Resource: "arn:aws:cognito-idp:${self:provider.region}:${env:ACCOUNT_ID}:userpool/${env:COGNITO_USER_POOL_ID}"
 
 functions:
   authApi:
     handler: index.handler
     events:
-      # Auth Signin
       - http:
           path: auth/signin
           method: post
       - http:
           path: auth/signin
           method: options
-
-      # Auth Checkuser
       - http:
-          path: auth/checkuser
+          path: auth/signup
           method: post
       - http:
-          path: auth/checkuser
+          path: auth/signup
           method: options
-
-      # Auth Register
-      - http:
-          path: auth/register
-          method: post
-      - http:
-          path: auth/register
-          method: options
-
-      # Auth Register Seller
-      - http: # POST for seller registration
-          path: auth/register-seller
-          method: post
-      - http: # OPTIONS for CORS preflight
-          path: auth/register-seller
-          method: options
-
-      # Auth Signout
       - http:
           path: auth/signout
           method: post
       - http:
           path: auth/signout
           method: options
-
-      # Auth Me
       - http:
           path: auth/me
           method: get
       - http:
           path: auth/me
           method: options
-
-      # Auth Refresh
       - http:
           path: auth/refresh
           method: post
       - http:
           path: auth/refresh
           method: options
-      # Social Signup Completion (adds user to group)
       - http:
           path: auth/process-social-login
           method: post
       - http:
           path: auth/process-social-login
           method: options
-
       - http:
           path: auth/complete-social-signup
           method: post

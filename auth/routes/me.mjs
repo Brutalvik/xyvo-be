@@ -1,40 +1,93 @@
-// routes/me.mjs
-import { verifyToken } from "../utils/helpers.mjs";
+import {
+  CognitoIdentityProviderClient,
+  AdminGetUserCommand,
+} from "@aws-sdk/client-cognito-identity-provider";
+import jwt from "jsonwebtoken";
 
-/**
- * Registers the /auth/me route
- * @param {import('fastify').FastifyInstance} app
- */
 export async function meRoute(app) {
+  const region = process.env.XYVO_REGION;
+  const userPoolId = process.env.COGNITO_USER_POOL_ID;
+  const jwtSecret = process.env.JWT_SECRET;
+  const cognitoClient = new CognitoIdentityProviderClient({ region });
+
   app.get("/auth/me", async (req, reply) => {
-    const token = req.cookies.token;
+    const origin = req.headers.origin;
+    const authHeader = req.headers["authorization"];
+    const cookieToken = req.cookies?.token;
+    const bearerToken = authHeader?.startsWith("Bearer ")
+      ? authHeader.slice(7)
+      : null;
+    const token = cookieToken || bearerToken;
 
     if (!token) {
-      req.log.warn("No token provided.");
       return reply
-        .clearCookie("x-token", { path: "/" })
-        .status(401)
-        .header("Access-Control-Allow-Origin", req.headers.origin)
+        .code(401)
+        .header("Access-Control-Allow-Origin", origin)
         .header("Access-Control-Allow-Credentials", "true")
-        .send({ message: "Unauthorized" });
+        .send({ isLoggedIn: false, message: "Not authenticated" });
     }
 
-    const user = verifyToken(token);
-
-    if (!user) {
-      req.log.warn("Invalid token.");
+    let decoded;
+    try {
+      decoded = jwt.verify(token, jwtSecret);
+    } catch (err) {
       return reply
-        .clearCookie("x-token", { path: "/" })
-        .status(401)
-        .header("Access-Control-Allow-Origin", req.headers.origin)
+        .code(401)
+        .header("Access-Control-Allow-Origin", origin)
         .header("Access-Control-Allow-Credentials", "true")
-        .send({ message: "Unauthorized" });
+        .send({ isLoggedIn: false, message: "Invalid or expired token" });
     }
 
-    return reply
-      .status(200)
-      .header("Access-Control-Allow-Origin", req.headers.origin)
-      .header("Access-Control-Allow-Credentials", "true")
-      .send({ user });
+    try {
+      const userDetails = await cognitoClient.send(
+        new AdminGetUserCommand({
+          UserPoolId: userPoolId,
+          Username: decoded.sub,
+        })
+      );
+
+      const attrs = Object.fromEntries(
+        (userDetails.UserAttributes || []).map(({ Name, Value }) => [
+          Name,
+          Value,
+        ])
+      );
+
+      const fullName =
+        attrs.name ||
+        `${attrs.given_name || ""} ${attrs.family_name || ""}`.trim() ||
+        decoded.email?.split("@")[0];
+
+      const user = {
+        id: attrs.sub || decoded.sub,
+        sub: attrs.sub || decoded.sub,
+        email: attrs.email || decoded.email,
+        name: fullName,
+        phone: attrs.phone_number || "",
+        image: attrs.picture || "",
+        organizationId: attrs["custom:organizationId"] || null,
+        timezone: attrs["custom:timezone"] || "UTC",
+        role: attrs["custom:role"] || "individual",
+        accountType: attrs["custom:accountType"] || "personal",
+        socialIdp: decoded.socialIdp || null,
+        attributes: attrs,
+      };
+
+      return reply
+        .header("Access-Control-Allow-Origin", origin)
+        .header("Access-Control-Allow-Credentials", "true")
+        .send({ isLoggedIn: true, user });
+    } catch (err) {
+      console.error("AdminGetUser error:", err);
+      return reply
+        .code(500)
+        .header("Access-Control-Allow-Origin", origin)
+        .header("Access-Control-Allow-Credentials", "true")
+        .send({
+          isLoggedIn: false,
+          message: "Failed to fetch user",
+          error: err.message,
+        });
+    }
   });
 }

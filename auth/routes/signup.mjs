@@ -9,8 +9,8 @@ import {
   GetUserCommand,
 } from "@aws-sdk/client-cognito-identity-provider";
 
-export async function registerRoutes(app) {
-  app.post("/auth/register", async (req, reply) => {
+export async function signupRoute(app) {
+  app.post("/auth/signup", async (req, reply) => {
     const region = process.env.XYVO_REGION;
     const clientId = process.env.COGNITO_CLIENT_ID;
     const clientSecret = process.env.COGNITO_CLIENT_SECRET;
@@ -20,14 +20,28 @@ export async function registerRoutes(app) {
     const cognitoClient = new CognitoIdentityProviderClient({ region });
 
     try {
-      const { email, phone, password, name } = req.body;
+      const { email, phone, password, name, usageType, timezone } = req.body;
 
       if (!email || !password || !name) {
         return reply
           .header("Access-Control-Allow-Origin", req.headers.origin)
           .header("Access-Control-Allow-Credentials", "true")
           .status(400)
-          .send({ message: "Email, password, and name are required" });
+          .send({
+            message: "Name, email, and password are required",
+          });
+      }
+
+      if (!usageType) {
+        return reply
+          .header("Access-Control-Allow-Origin", req.headers.origin)
+          .header("Access-Control-Allow-Credentials", "true")
+          .status(202)
+          .send({
+            message:
+              "Please confirm if this account is for personal or team use.",
+            requireUsageType: true,
+          });
       }
 
       const secretHash = calculateSecretHash(email, clientId, clientSecret);
@@ -37,20 +51,34 @@ export async function registerRoutes(app) {
         Username: email,
         Password: password,
         SecretHash: secretHash,
-        type: "buyer",
         UserAttributes: [
           { Name: "email", Value: email },
           { Name: "name", Value: name },
           { Name: "given_name", Value: name },
-          { Name: "phone_number", Value: phone },
+          {
+            Name: "phone_number",
+            Value: phone.startsWith("+") ? phone : `+${phone}`,
+          },
+          { Name: "custom:account_type", Value: usageType },
+          { Name: "custom:timezone", Value: timezone || "UTC" },
+          {
+            Name: "custom:role",
+            Value: usageType === "team" ? "owner" : "individual",
+          },
+          {
+            Name: "custom:organization_id",
+            Value: usageType === "team" ? "pending" : "",
+          },
         ],
       });
+
       await cognitoClient.send(signUpCommand);
 
       const confirmCommand = new AdminConfirmSignUpCommand({
         UserPoolId: userPoolId,
         Username: email,
       });
+
       await cognitoClient.send(confirmCommand);
 
       const authCommand = new InitiateAuthCommand({
@@ -100,7 +128,10 @@ export async function registerRoutes(app) {
         email: attributes.email,
         name: attributes.name || attributes.given_name,
         phone: attributes.phone_number || null,
-        accountType: attributes.type,
+        accountType: attributes["custom:accountType"],
+        organizationId: attributes["custom:organizationId"] || null,
+        timezone: attributes["custom:timezone"] || "UTC",
+        role: attributes["custom:role"] || "individual",
         attributes,
       };
 
@@ -123,6 +154,8 @@ export async function registerRoutes(app) {
           })
         )
         .header("Access-Control-Allow-Origin", req.headers.origin)
+        .header("Access-Control-Allow-Methods", "POST, OPTIONS")
+        .header("Access-Control-Allow-Headers", "Content-Type")
         .header("Access-Control-Allow-Credentials", "true")
         .status(201)
         .send({ user, isRegistered: true, isLoggedIn: true });
