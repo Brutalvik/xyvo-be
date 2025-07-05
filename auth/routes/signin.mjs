@@ -96,7 +96,7 @@ export async function signinRoute(app) {
           refreshToken,
           getCookieOptions({
             includeMaxAge: true,
-            maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+            maxAge: 30 * 24 * 60 * 60,
             path: "/auth/refresh",
           })
         )

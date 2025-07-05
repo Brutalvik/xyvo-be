@@ -15,6 +15,11 @@ provider:
     COGNITO_CLIENT_SECRET: ${env:COGNITO_CLIENT_SECRET}
     JWT_SECRET: ${env:JWT_SECRET}
     ACCOUNT_ID: ${env:ACCOUNT_ID}
+    DB_HOST: ${env:DB_HOST}
+    DB_PORT: ${env:DB_PORT}
+    DB_USER: ${env:DB_USER}
+    DB_PASSWORD: ${env:DB_PASSWORD}
+    DB_NAME: ${env:DB_NAME}
 
   iamRoleStatements:
     - Effect: "Allow"
@@ -32,48 +37,119 @@ functions:
   authApi:
     handler: index.handler
     events:
+      # 🔐 Auth
+      - http: { path: "auth/signin", method: post }
+      - http: { path: "auth/signin", method: options }
+      - http: { path: "auth/signup", method: post }
+      - http: { path: "auth/signup", method: options }
+      - http: { path: "auth/signout", method: post }
+      - http: { path: "auth/signout", method: options }
+      - http: { path: "auth/me", method: get }
+      - http: { path: "auth/me", method: options }
+      - http: { path: "auth/refresh", method: post }
+      - http: { path: "auth/refresh", method: options }
+      - http: { path: "auth/process-social-login", method: post }
+      - http: { path: "auth/process-social-login", method: options }
+      - http: { path: "auth/complete-social-signup", method: post }
+      - http: { path: "auth/complete-social-signup", method: options }
+
+      # 🧍‍♂️ Users
+      - http: { path: "users", method: get }
+      - http: { path: "users", method: options }
+      - http: { path: "users/{id}", method: get }
+      - http: { path: "users/{id}", method: patch }
+      - http: { path: "users/{id}", method: delete }
+      - http: { path: "users/{id}", method: options }
+
+      # 🏢 Organizations
+      - http: { path: "organizations", method: get }
+      - http: { path: "organizations", method: post }
+      - http: { path: "organizations", method: options }
+      - http: { path: "organizations/{id}", method: get }
+      - http: { path: "organizations/{id}", method: patch }
+      - http: { path: "organizations/{id}", method: delete }
+      - http: { path: "organizations/{id}", method: options }
+
+      # 👥 Teams
+      - http: { path: "teams", method: get }
+      - http: { path: "teams", method: post }
+      - http: { path: "teams", method: options }
+      - http: { path: "teams/{id}", method: get }
+      - http: { path: "teams/{id}", method: patch }
+      - http: { path: "teams/{id}", method: delete }
+      - http: { path: "teams/{id}", method: options }
+
+      # 🧑‍🤝‍🧑 Team Members
+      - http: { path: "team-members", method: get }
+      - http: { path: "team-members", method: post }
+      - http: { path: "team-members", method: options }
+      - http: { path: "team-members/team/{teamId}", method: get }
+      - http: { path: "team-members/team/{teamId}", method: options }
+      - http: { path: "team-members/user/{userId}", method: get }
+      - http: { path: "team-members/user/{userId}", method: options }
+      - http: { path: "team-members/{id}", method: patch }
+      - http: { path: "team-members/{id}", method: delete }
+      - http: { path: "team-members/{id}", method: options }
+
+      # 📁 Projects
+      - http: { path: "projects", method: get }
+      - http: { path: "projects", method: post }
+      - http: { path: "projects", method: options }
+      - http: { path: "projects/{id}", method: get }
+      - http: { path: "projects/{id}", method: patch }
+      - http: { path: "projects/{id}", method: delete }
+      - http: { path: "projects/{id}", method: options }
+
+      # 🧾 Sprints
+      - http: { path: "sprints", method: get }
+      - http: { path: "sprints", method: post }
+      - http: { path: "sprints", method: options }
+      - http: { path: "sprints/{id}", method: get }
+      - http: { path: "sprints/{id}", method: patch }
+      - http: { path: "sprints/{id}", method: delete }
+      - http: { path: "sprints/{id}", method: options }
+
+      # 📋 Backlogs
+      - http: { path: "backlogs", method: get }
+      - http: { path: "backlogs", method: post }
+      - http: { path: "backlogs", method: options }
+      - http: { path: "backlogs/{id}", method: get }
+      - http: { path: "backlogs/{id}", method: patch }
+      - http: { path: "backlogs/{id}", method: delete }
+      - http: { path: "backlogs/{id}", method: options }
+
+      # 🔐 User Permissions
+      - http: { path: "user-permissions", method: get }
+      - http: { path: "user-permissions", method: post }
+      - http: { path: "user-permissions", method: options }
+
+      - http: { path: "user-permissions/user/{userId}", method: get }
+      - http: { path: "user-permissions/user/{userId}", method: options }
+
       - http:
-          path: auth/signin
-          method: post
+          {
+            path: "user-permissions/resource/{resourceType}/{resourceId}",
+            method: get,
+          }
       - http:
-          path: auth/signin
-          method: options
-      - http:
-          path: auth/signup
-          method: post
-      - http:
-          path: auth/signup
-          method: options
-      - http:
-          path: auth/signout
-          method: post
-      - http:
-          path: auth/signout
-          method: options
-      - http:
-          path: auth/me
-          method: get
-      - http:
-          path: auth/me
-          method: options
-      - http:
-          path: auth/refresh
-          method: post
-      - http:
-          path: auth/refresh
-          method: options
-      - http:
-          path: auth/process-social-login
-          method: post
-      - http:
-          path: auth/process-social-login
-          method: options
-      - http:
-          path: auth/complete-social-signup
-          method: post
-      - http:
-          path: auth/complete-social-signup
-          method: options
+          {
+            path: "user-permissions/resource/{resourceType}/{resourceId}",
+            method: options,
+          }
+
+      - http: { path: "user-permissions/{id}", method: patch }
+      - http: { path: "user-permissions/{id}", method: delete }
+      - http: { path: "user-permissions/{id}", method: options }
+
+      # ⚙️ Internal
+      - http: { path: "health", method: get }
+      - http: { path: "health", method: options }
+      - http: { path: "docs", method: get }
+      - http: { path: "docs", method: options }
+
+      # 🔐 Permissions
+      - http: { path: "permissions", method: get }
+      - http: { path: "permissions", method: options }
 
 package:
   individually: true

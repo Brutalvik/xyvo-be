@@ -13,6 +13,18 @@ import { signinRoute } from "./routes/signin.mjs";
 import { refreshRoute } from "./routes/refresh.mjs";
 import { meRoute } from "./routes/me.mjs";
 import { signoutRoute } from "./routes/signout.mjs";
+import { dbHealthRoute } from "./routes/dbHealth.mjs";
+
+import { userRoutes } from "./routes/users.mjs";
+import { organizationRoutes } from "./routes/organization.mjs";
+import { teamRoutes } from "./routes/teams.mjs";
+import { teamMemberRoutes } from "./routes/teamMembers.mjs";
+import { userPermissionRoutes } from "./routes/userPermissions.mjs";
+import { projectRoutes } from "./routes/projects.mjs";
+import { sprintRoutes } from "./routes/sprints.mjs";
+import { backlogRoutes } from "./routes/backlogs.mjs";
+import { docsRoutes } from "./routes/routes.mjs";
+import { permissionsRoutes } from "./routes/permissions.mjs";
 
 const app = fastify({ logger: true });
 
@@ -32,7 +44,7 @@ app.register(fastifyCors, {
     }
   },
   credentials: true,
-  methods: ["GET", "POST", "OPTIONS"],
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
 });
 
@@ -43,6 +55,9 @@ app.addContentTypeParser(
   { parseAs: "string" },
   (req, body, done) => {
     try {
+      if (!body || body.trim() === "") {
+        return done(null, {});
+      }
       const json = JSON.parse(body);
       done(null, json);
     } catch (err) {
@@ -57,6 +72,17 @@ await app.register(refreshRoute);
 await app.register(signinRoute);
 await app.register(meRoute);
 await app.register(signoutRoute);
+await app.register(dbHealthRoute);
+await app.register(userRoutes);
+await app.register(organizationRoutes);
+await app.register(teamRoutes);
+await app.register(teamMemberRoutes);
+await app.register(userPermissionRoutes);
+await app.register(projectRoutes);
+await app.register(sprintRoutes);
+await app.register(backlogRoutes);
+await app.register(docsRoutes);
+await app.register(permissionsRoutes);
 
 export const handler = awsLambdaFastify(app);
 

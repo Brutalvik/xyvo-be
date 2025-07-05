@@ -3,6 +3,7 @@ import {
   AdminGetUserCommand,
 } from "@aws-sdk/client-cognito-identity-provider";
 import jwt from "jsonwebtoken";
+import { query } from "../utils/db.mjs";
 
 export async function meRoute(app) {
   const region = process.env.XYVO_REGION;
@@ -58,18 +59,44 @@ export async function meRoute(app) {
         `${attrs.given_name || ""} ${attrs.family_name || ""}`.trim() ||
         decoded.email?.split("@")[0];
 
+      const userId = attrs.sub || decoded.sub;
+      const organizationId =
+        attrs["custom:organizationId"] ||
+        attrs["custom:organization_id"] ||
+        null;
+
+      const permissionsRes = await query(
+        "SELECT permission FROM user_permissions WHERE user_id = $1",
+        [userId]
+      );
+      const permissions = permissionsRes.rows.map((r) => r.permission);
+
+      let organizationName = null;
+      if (organizationId) {
+        const orgRes = await query(
+          "SELECT name FROM organizations WHERE id = $1",
+          [organizationId]
+        );
+        organizationName = orgRes.rows[0]?.name || null;
+      }
+
       const user = {
-        id: attrs.sub || decoded.sub,
-        sub: attrs.sub || decoded.sub,
+        id: userId,
+        sub: userId,
         email: attrs.email || decoded.email,
         name: fullName,
         phone: attrs.phone_number || "",
         image: attrs.picture || "",
-        organizationId: attrs["custom:organizationId"] || null,
+        organizationId,
+        organizationName,
         timezone: attrs["custom:timezone"] || "UTC",
         role: attrs["custom:role"] || "individual",
         accountType: attrs["custom:accountType"] || "personal",
         socialIdp: decoded.socialIdp || null,
+        createdAt: attrs["custom:created_at"] || null,
+        lastLogin: attrs["custom:last_login"] || null,
+        status: attrs["custom:status"] || "active",
+        permissions,
         attributes: attrs,
       };
 
