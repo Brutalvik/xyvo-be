@@ -53,11 +53,13 @@ export async function signupRoute(app) {
           ? `${name}'s Organization`
           : `${name}'s Personal Org`;
 
+      // Insert organization
       await query(
         `INSERT INTO organizations (id, name, plan) VALUES ($1, $2, $3)`,
         [organizationId, orgName, plan || "free"]
       );
 
+      // Sign up in Cognito
       const signUpCommand = new SignUpCommand({
         ClientId: clientId,
         Username: email,
@@ -78,15 +80,13 @@ export async function signupRoute(app) {
             Name: "custom:role",
             Value: usageType === "team" ? "owner" : "individual",
           },
-          {
-            Name: "custom:organization_id",
-            Value: organizationId,
-          },
+          { Name: "custom:organization_id", Value: organizationId },
         ],
       });
 
       await cognitoClient.send(signUpCommand);
 
+      // Auto-confirm user
       await cognitoClient.send(
         new AdminConfirmSignUpCommand({
           UserPoolId: userPoolId,
@@ -94,6 +94,7 @@ export async function signupRoute(app) {
         })
       );
 
+      // Sign in the user
       const authResponse = await cognitoClient.send(
         new InitiateAuthCommand({
           AuthFlow: "USER_PASSWORD_AUTH",
@@ -128,6 +129,7 @@ export async function signupRoute(app) {
           });
       }
 
+      // Get user info from Cognito
       const getUserCommand = new GetUserCommand({ AccessToken: accessToken });
       const userData = await cognitoClient.send(getUserCommand);
 
@@ -150,8 +152,10 @@ export async function signupRoute(app) {
         attributes,
       };
 
+      // UPSERT user into DB
       await query(
-        `INSERT INTO users (
+        `
+        INSERT INTO users (
           id, sub, email, name, phone,
           image, role, account_type,
           organization_id, timezone, plan,
@@ -161,7 +165,18 @@ export async function signupRoute(app) {
           $6, $7, $8,
           $9, $10, $11,
           NOW(), NOW()
-        )`,
+        )
+        ON CONFLICT (email) DO UPDATE SET
+          sub = EXCLUDED.sub,
+          name = EXCLUDED.name,
+          phone = EXCLUDED.phone,
+          role = EXCLUDED.role,
+          account_type = EXCLUDED.account_type,
+          organization_id = EXCLUDED.organization_id,
+          timezone = EXCLUDED.timezone,
+          plan = EXCLUDED.plan,
+          updated_at = NOW();
+        `,
         [
           user.id,
           user.sub,
@@ -177,8 +192,10 @@ export async function signupRoute(app) {
         ]
       );
 
+      // Generate JWT
       const jwtToken = jwt.sign(user, jwtSecret, { expiresIn: "1h" });
 
+      // Send cookies and response
       reply
         .setCookie("token", jwtToken, getCookieOptions({ includeMaxAge: true }))
         .setCookie("x-token", jwtToken, {
@@ -211,7 +228,7 @@ export async function signupRoute(app) {
 
       if (error.name === "UsernameExistsException") {
         return reply.headers(headers).status(409).send({
-          message: "Email already registered.",
+          message: "Email already registered in Cognito.",
         });
       }
 

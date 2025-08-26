@@ -25,6 +25,7 @@ import { sprintRoutes } from "./routes/sprints.mjs";
 import { backlogRoutes } from "./routes/backlogs.mjs";
 import { docsRoutes } from "./routes/routes.mjs";
 import { permissionsRoutes } from "./routes/permissions.mjs";
+import { resetPasswordRoutes } from "./routes/resetPassword.mjs";
 
 const app = fastify({ logger: true });
 
@@ -83,6 +84,7 @@ await app.register(sprintRoutes);
 await app.register(backlogRoutes);
 await app.register(docsRoutes);
 await app.register(permissionsRoutes);
+await app.register(resetPasswordRoutes);
 
 export const handler = awsLambdaFastify(app);
 
