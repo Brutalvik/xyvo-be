@@ -11,7 +11,6 @@ import { signupRoute } from "./routes/signup.mjs";
 import { socialAuthRoute } from "./routes/socialAuthRoutes.mjs";
 import { signinRoute } from "./routes/signin.mjs";
 import { refreshRoute } from "./routes/refresh.mjs";
-import { meRoute } from "./routes/me.mjs";
 import { signoutRoute } from "./routes/signout.mjs";
 import { dbHealthRoute } from "./routes/dbHealth.mjs";
 
@@ -26,6 +25,8 @@ import { backlogRoutes } from "./routes/backlogs.mjs";
 import { docsRoutes } from "./routes/routes.mjs";
 import { permissionsRoutes } from "./routes/permissions.mjs";
 import { resetPasswordRoutes } from "./routes/resetPassword.mjs";
+import { resendVerificationRoute } from "./routes/resendVerification.mjs";
+import { verifyCodeRoute } from "./routes/verifyCode.mjs";
 
 const app = fastify({ logger: true });
 
@@ -47,6 +48,7 @@ app.register(fastifyCors, {
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
+  preflight: true 
 });
 
 app.register(fastifyCookie);
@@ -71,7 +73,6 @@ await app.register(signupRoute);
 await app.register(socialAuthRoute);
 await app.register(refreshRoute);
 await app.register(signinRoute);
-await app.register(meRoute);
 await app.register(signoutRoute);
 await app.register(dbHealthRoute);
 await app.register(userRoutes);
@@ -85,6 +86,8 @@ await app.register(backlogRoutes);
 await app.register(docsRoutes);
 await app.register(permissionsRoutes);
 await app.register(resetPasswordRoutes);
+await app.register(resendVerificationRoute);
+await app.register(verifyCodeRoute);
 
 export const handler = awsLambdaFastify(app);
 

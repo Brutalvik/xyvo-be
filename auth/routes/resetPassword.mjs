@@ -79,8 +79,11 @@ export async function resetPasswordRoutes(app) {
       await cognitoClient.send(forgotPasswordCommand);
 
       // Success: Cognito will send the code to the user's email (or phone if configured)
-      return reply.send({
-        message: "Reset code sent to the user's email (if account exists in Cognito).",
+      return reply
+        .header("Access-Control-Allow-Origin", req.headers.origin)
+        .header("Access-Control-Allow-Credentials", "true")
+        .status(200).send({
+            message: "Reset code sent to the user's email (if account exists in Cognito).",
       });
     } catch (err) {
       req.log.error("Cognito forgot-password error:", err?.name || err);
@@ -117,7 +120,11 @@ export async function resetPasswordRoutes(app) {
       await cognitoClient.send(confirmCommand);
 
       // If Cognito returns successfully, the password was changed and the code was valid
-      return reply.send({ message: "Password has been reset successfully" });
+      return reply
+        .header("Access-Control-Allow-Origin", req.headers.origin)
+        .header("Access-Control-Allow-Credentials", "true")
+        .status(200)
+        .send({ message: "Password has been reset successfully" });
     } catch (err) {
       req.log.error("Cognito confirm-reset error:", err?.name || err);
       // Map common errors

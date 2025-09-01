@@ -10,6 +10,8 @@ export async function signoutRoute(app) {
     const origin = req.headers.origin;
 
     reply
+      .header("Access-Control-Allow-Origin", origin || "*")
+      .header("Access-Control-Allow-Credentials", "true")
       .clearCookie("token", getCookieOptions({ includeMaxAge: false }))
       .clearCookie("x-token", {
         ...getCookieOptions({ includeMaxAge: false }),
@@ -19,8 +21,6 @@ export async function signoutRoute(app) {
         "refreshToken",
         getCookieOptions({ includeMaxAge: false, path: "/auth/refresh" })
       )
-      .header("Access-Control-Allow-Origin", origin || "*")
-      .header("Access-Control-Allow-Credentials", "true")
       .status(200)
       .send({ message: "Successfully signed out." });
   });

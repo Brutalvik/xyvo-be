@@ -44,14 +44,20 @@ functions:
       - http: { path: "auth/signup", method: options }
       - http: { path: "auth/signout", method: post }
       - http: { path: "auth/signout", method: options }
-      - http: { path: "auth/me", method: get }
-      - http: { path: "auth/me", method: options }
       - http: { path: "auth/refresh", method: post }
       - http: { path: "auth/refresh", method: options }
       - http: { path: "auth/process-social-login", method: post }
       - http: { path: "auth/process-social-login", method: options }
       - http: { path: "auth/complete-social-signup", method: post }
       - http: { path: "auth/complete-social-signup", method: options }
+      - http: { path: "auth/resend-verification", method: post }
+      - http: { path: "auth/resend-verification", method: options }
+      - http: { path: "auth/verify-code", method: post }
+      - http: { path: "auth/verify-code", method: options }
+      - http: { path: "auth/request-password-reset", method: post }
+      - http: { path: "auth/request-password-reset", method: options }
+      - http: { path: "auth/reset-password", method: post }
+      - http: { path: "auth/reset-password", method: options }
 
       # 🧍‍♂️ Users
       - http: { path: "users", method: get }
