@@ -58,6 +58,8 @@ functions:
       - http: { path: "auth/request-password-reset", method: options }
       - http: { path: "auth/reset-password", method: post }
       - http: { path: "auth/reset-password", method: options }
+      - http: { path: "auth/confirm-reset", method: post }
+      - http: { path: "auth/confirm-reset", method: options }
 
       # 🧍‍♂️ Users
       - http: { path: "users", method: get }
