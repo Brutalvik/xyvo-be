@@ -72,7 +72,7 @@ export async function signinRoute(app) {
         })
       );
 
-      // ✅ Build attributes object efficiently (O(n), no extra allocations)
+      // ✅ Build attributes object
       const attrs = {};
       for (const { Name, Value } of userDetails.UserAttributes || []) {
         attrs[Name] = Value;
@@ -119,6 +119,34 @@ export async function signinRoute(app) {
         permissions,
         confirmedUser: userDetails.UserStatus,
       };
+
+      // ✅ Ensure user exists in `users` table (UPSERT)
+        await query(
+          `INSERT INTO users (id, sub, email, name, organization_id, role, account_type, timezone, plan)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          ON CONFLICT (sub) DO UPDATE 
+          SET id = EXCLUDED.id,
+              email = EXCLUDED.email,
+              name = EXCLUDED.name,
+              organization_id = EXCLUDED.organization_id,
+              role = EXCLUDED.role,
+              account_type = EXCLUDED.account_type,
+              timezone = EXCLUDED.timezone,
+              plan = EXCLUDED.plan`,
+          [
+            user.id,          // use Cognito sub (as both id + sub if you want)
+            user.id,          // sub
+            user.email,
+            user.name,
+            user.organizationId,
+            user.role,
+            user.accountType,
+            user.timezone,
+            user.plan || "free",
+          ]
+        );
+
+
 
       // ✅ Generate JWT
       const jwtToken = jwt.sign(

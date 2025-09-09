@@ -82,63 +82,60 @@ export async function userPermissionRoutes(app) {
   );
 
   // POST assign permission
-  app.post(
-    "/user-permissions",
-    { preHandler: verifyJwt },
-    async (req, reply) => {
-      const {
-        user_id,
-        resource_type,
-        resource_id,
-        permission,
-        granted_by,
-        expires_at = null,
-      } = req.body || {};
+app.post(
+  "/user-permissions",
+  { preHandler: verifyJwt },
+  async (req, reply) => {
+    const {
+      user_id,        // must be internal users.id
+      resource_type,
+      resource_id,
+      permission,
+      expires_at = null,
+    } = req.body || {};
 
-      if (
-        !user_id ||
-        !resource_type ||
-        !resource_id ||
-        !permission ||
-        !granted_by
-      ) {
-        return reply
-          .header("Access-Control-Allow-Origin", req.headers.origin)
-          .header("Access-Control-Allow-Credentials", "true")
-          .status(400)
-          .send({ success: false, error: "Missing required fields" });
-      }
+    console.log("REQUEST BODY:", req.body);
 
-      try {
-        const res = await query(
-          `INSERT INTO user_permissions (user_id, resource_type, resource_id, permission, granted_by, granted_at, expires_at)
-         VALUES ($1, $2, $3, $4, $5, NOW(), $6)
-         RETURNING *`,
-          [
-            user_id,
-            resource_type,
-            resource_id,
-            permission,
-            granted_by,
-            expires_at,
-          ]
-        );
-
-        return reply
-          .header("Access-Control-Allow-Origin", req.headers.origin)
-          .header("Access-Control-Allow-Credentials", "true")
-          .status(201)
-          .send({ success: true, user_permission: res.rows[0] });
-      } catch (err) {
-        req.log.error("POST /user-permissions error:", err);
-        return reply
-          .header("Access-Control-Allow-Origin", req.headers.origin)
-          .header("Access-Control-Allow-Credentials", "true")
-          .status(500)
-          .send({ success: false, error: "Failed to assign user permission" });
-      }
+    if (!user_id || !resource_type || !resource_id || !permission) {
+      return reply
+        .header("Access-Control-Allow-Origin", req.headers.origin)
+        .header("Access-Control-Allow-Credentials", "true")
+        .status(400)
+        .send({ success: false, error: "Missing required fields" });
     }
-  );
+
+    try {
+      // safer: take granted_by from JWT instead of client
+      const granted_by = req.user?.id || null;
+
+      const res = await query(
+        `INSERT INTO user_permissions 
+           (user_id, resource_type, resource_id, permission, granted_by, granted_at, expires_at)
+         VALUES ($1, $2, $3, $4, $5, NOW(), $6)
+         ON CONFLICT (user_id, resource_type, resource_id, permission)
+         DO UPDATE SET expires_at = EXCLUDED.expires_at, granted_by = EXCLUDED.granted_by
+         RETURNING *`,
+        [user_id, resource_type, resource_id, permission, granted_by, expires_at]
+      );
+
+      return reply
+        .header("Access-Control-Allow-Origin", req.headers.origin)
+        .header("Access-Control-Allow-Credentials", "true")
+        .status(201)
+        .send({ success: true, user_permission: res.rows[0] });
+    } catch (err) {
+      console.error("ERROR:", err);
+      req.log.error("POST /user-permissions error:", err);
+
+      return reply
+        .header("Access-Control-Allow-Origin", req.headers.origin)
+        .header("Access-Control-Allow-Credentials", "true")
+        .status(500)
+        .send({ success: false, error: "Failed to assign user permission" });
+    }
+  }
+);
+
 
   // PATCH update permission
   app.patch(
