@@ -66,7 +66,6 @@ export async function projectRoutes(app) {
 
   // POST /projects
   app.post("/projects", { preHandler: verifyJwt }, async (req, reply) => {
-    console.log("REQUEST : ", req.body);
     const {
       name,
       description,
@@ -81,9 +80,6 @@ export async function projectRoutes(app) {
 
     const created_by = req.user?.id;
     const organization_id = req.user?.organizationId;
-
-    console.log("ORG ID : ", organization_id);
-    console.log("CREATED BY : ", created_by);
 
     if (!name || !created_by || !organization_id) {
       return reply

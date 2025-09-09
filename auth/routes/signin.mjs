@@ -72,8 +72,6 @@ export async function signinRoute(app) {
         })
       );
 
-      console.log("User details fetched:", userDetails.UserStatus);
-
       // ✅ Build attributes object efficiently (O(n), no extra allocations)
       const attrs = {};
       for (const { Name, Value } of userDetails.UserAttributes || []) {
