@@ -8,7 +8,6 @@ import { getCookieOptions } from "../utils/cookieOptions.mjs";
 import { calculateSecretHash } from "../utils/helpers.mjs";
 import { query } from "../utils/db.mjs";
 
-// ✅ Move static configs outside to avoid recomputing for each request
 const region = process.env.XYVO_REGION;
 const jwtSecret = process.env.JWT_SECRET;
 const clientId = process.env.COGNITO_CLIENT_ID;
@@ -31,7 +30,7 @@ export async function signinRoute(app) {
 
       const secretHash = calculateSecretHash(email, clientId, clientSecret);
 
-      // ✅ Authenticate with Cognito
+      // Authenticate with Cognito
       const authCommand = new InitiateAuthCommand({
         AuthFlow: "USER_PASSWORD_AUTH",
         ClientId: clientId,
@@ -64,7 +63,7 @@ export async function signinRoute(app) {
           .send({ error: "Authentication failed: Missing tokens." });
       }
 
-      // ✅ Fetch user details from Cognito
+      // Fetch user details from Cognito
       const userDetails = await cognitoClient.send(
         new AdminGetUserCommand({
           UserPoolId: userPoolId,
@@ -72,7 +71,6 @@ export async function signinRoute(app) {
         })
       );
 
-      // ✅ Build attributes object
       const attrs = {};
       for (const { Name, Value } of userDetails.UserAttributes || []) {
         attrs[Name] = Value;
@@ -88,7 +86,7 @@ export async function signinRoute(app) {
         attrs["custom:organization_id"] ||
         null;
 
-      // ✅ Run DB queries in parallel
+      // Run DB queries in parallel
       const [permissionsRes, orgRes] = await Promise.all([
         query("SELECT permission FROM user_permissions WHERE user_id = $1", [
           userId,
@@ -103,7 +101,7 @@ export async function signinRoute(app) {
       const permissions = permissionsRes.rows.map((r) => r.permission);
       const organizationName = orgRes.rows[0]?.name || null;
 
-      // ✅ Construct user object
+      // Construct user object
       const user = {
         id: userId,
         email: attrs.email || email,
@@ -120,9 +118,9 @@ export async function signinRoute(app) {
         confirmedUser: userDetails.UserStatus,
       };
 
-      // ✅ Ensure user exists in `users` table (UPSERT)
-        await query(
-          `INSERT INTO users (id, sub, email, name, organization_id, role, account_type, timezone, plan)
+      // Ensure user exists in `users` table (UPSERT)
+      await query(
+        `INSERT INTO users (id, sub, email, name, organization_id, role, account_type, timezone, plan)
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
           ON CONFLICT (sub) DO UPDATE 
           SET id = EXCLUDED.id,
@@ -133,22 +131,33 @@ export async function signinRoute(app) {
               account_type = EXCLUDED.account_type,
               timezone = EXCLUDED.timezone,
               plan = EXCLUDED.plan`,
-          [
-            user.id,          // use Cognito sub (as both id + sub if you want)
-            user.id,          // sub
-            user.email,
-            user.name,
-            user.organizationId,
-            user.role,
-            user.accountType,
-            user.timezone,
-            user.plan || "free",
-          ]
-        );
+        [
+          user.id,
+          user.id,
+          user.email,
+          user.name,
+          user.organizationId,
+          user.role,
+          user.accountType,
+          user.timezone,
+          user.plan || "free",
+        ]
+      );
 
+      // // ✅ Track last login
+      // const lastLoginRes = await query(
+      //   "SELECT last_login FROM users WHERE id = $1",
+      //   [user.id]
+      // );
+      // const previousLastLogin = lastLoginRes.rows[0]?.last_login || null;
 
+      // await query("UPDATE users SET last_login = NOW() WHERE id = $1", [
+      //   user.id,
+      // ]);
 
-      // ✅ Generate JWT
+      // user.lastLogin = previousLastLogin;
+
+      // Generate JWT
       const jwtToken = jwt.sign(
         {
           id: user.id,
@@ -161,7 +170,7 @@ export async function signinRoute(app) {
         jwtSecret
       );
 
-      // ✅ Set cookies and return response
+      // Set cookies and return response
       reply
         .header("Access-Control-Allow-Origin", req.headers.origin)
         .header("Access-Control-Allow-Credentials", "true")

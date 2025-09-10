@@ -4,6 +4,7 @@ import awsLambdaFastify from "@fastify/aws-lambda";
 import fastify from "fastify";
 import fastifyCors from "@fastify/cors";
 import fastifyCookie from "fastify-cookie";
+import multipart from "@fastify/multipart";
 
 dotenv.config();
 
@@ -27,6 +28,7 @@ import { permissionsRoutes } from "./routes/permissions.mjs";
 import { resetPasswordRoutes } from "./routes/resetPassword.mjs";
 import { resendVerificationRoute } from "./routes/resendVerification.mjs";
 import { verifyCodeRoute } from "./routes/verifyCode.mjs";
+import { notificationRoutes } from "./routes/notifcations.mjs";
 
 const app = fastify({ logger: true });
 
@@ -48,10 +50,17 @@ app.register(fastifyCors, {
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
-  preflight: true 
+  preflight: true,
 });
 
 app.register(fastifyCookie);
+
+// enable multipart support
+app.register(multipart, {
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10 MB per file
+  },
+});
 
 app.addContentTypeParser(
   "application/json",
@@ -88,6 +97,7 @@ await app.register(permissionsRoutes);
 await app.register(resetPasswordRoutes);
 await app.register(resendVerificationRoute);
 await app.register(verifyCodeRoute);
+await app.register(notificationRoutes);
 
 export const handler = awsLambdaFastify(app);
 
