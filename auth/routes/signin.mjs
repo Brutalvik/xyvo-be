@@ -165,6 +165,7 @@ export async function signinRoute(app) {
           name: user.name,
           organizationId: user.organizationId,
           role: user.role,
+          permissions,
           exp: Math.floor(Date.now() / 1000) + expiresIn,
         },
         jwtSecret
